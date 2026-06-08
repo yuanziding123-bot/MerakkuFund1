@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from polyagents.dataflows.features import extract_features, format_features_report
+from polyagents.dataflows.forecaster import CandleForecaster, NullForecaster
 from polyagents.dataflows.interface import (
     fetch_enriched_candles,
     format_price_report,
@@ -22,6 +24,7 @@ from polyagents.dataflows.interface import (
 )
 from polyagents.dataflows.news import NewsClient
 from polyagents.dataflows.polymarket_client import PolymarketDataClient
+from polyagents.dataflows.sentiment import LexiconSentimentScorer, SentimentScorer
 
 Node = Callable[[dict], dict]
 
@@ -72,11 +75,38 @@ def create_trades_flow_collector(client: PolymarketDataClient, config: dict) -> 
     return node
 
 
-def create_news_collector(news_client: NewsClient, config: dict) -> Node:
+def create_news_collector(
+    news_client: NewsClient,
+    config: dict,
+    scorer: SentimentScorer | None = None,
+) -> Node:
+    """News + FinGPT-inspired sentiment. ``scorer`` defaults to the lexicon scorer."""
+    scorer = scorer or LexiconSentimentScorer()
+
     def node(state: dict) -> dict[str, Any]:
-        text, data = get_news_report(news_client, state["question"], max_results=config["news_max_results"])
+        text, data = get_news_report(
+            news_client, state["question"], max_results=config["news_max_results"], scorer=scorer
+        )
         raw = dict(state.get("raw", {}))
         raw["news"] = data
         return {"news_report": text, "raw": raw}
+
+    return node
+
+
+def create_features_collector(forecaster: CandleForecaster | None = None) -> Node:
+    """Alpha DevBox-inspired join: consolidate all collector outputs into factors.
+
+    Runs last in the chain so every ``raw`` source is populated. Calls the
+    (Kronos) forecaster hook on the close series; a real forecaster adds a
+    ``forecast`` block, the default ``NullForecaster`` adds nothing.
+    """
+    forecaster = forecaster or NullForecaster()
+
+    def node(state: dict) -> dict[str, Any]:
+        raw = dict(state.get("raw", {}))
+        data = extract_features(raw, forecaster=forecaster)
+        raw["features"] = data
+        return {"features_report": format_features_report(data), "raw": raw}
 
     return node

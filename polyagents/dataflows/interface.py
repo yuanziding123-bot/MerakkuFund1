@@ -16,8 +16,10 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from .microstructure import compute_microstructure, format_microstructure_report
 from .news import NewsClient
 from .polymarket_client import PolymarketDataClient
+from .sentiment import LexiconSentimentScorer, SentimentScorer, aggregate_sentiment
 from .types import Candle, Market
 from .utils import utcnow
 from .volume import enrich_candles_with_volume
@@ -72,6 +74,8 @@ def format_price_report(candles: list[Candle]) -> tuple[str, dict[str, Any]]:
         "pct_change": change,
         "start": candles[0].ts.isoformat(),
         "end": candles[-1].ts.isoformat(),
+        # Trimmed close series — consumed by the Kronos-style forecaster hook.
+        "closes": closes[-200:],
     }
     text = (
         f"Price history: {len(candles)} bars from {data['start']} to {data['end']}.\n"
@@ -109,35 +113,13 @@ def format_volume_report(candles: list[Candle]) -> tuple[str, dict[str, Any]]:
 
 # ----- order book -----------------------------------------------------------
 
-def get_orderbook_report(client: PolymarketDataClient, token_id: str, depth: int = 5) -> tuple[str, dict[str, Any]]:
+def get_orderbook_report(client: PolymarketDataClient, token_id: str) -> tuple[str, dict[str, Any]]:
+    """L2 microstructure (MarketLens-inspired) from the public book snapshot."""
     book = client.fetch_order_book(token_id)
     if book is None:
         return "Order book unavailable.", {"available": False}
-    bid_depth = sum(l.size for l in book.bids[:depth])
-    ask_depth = sum(l.size for l in book.asks[:depth])
-    total = bid_depth + ask_depth
-    imbalance = (bid_depth - ask_depth) / total if total else 0.0
-    data = {
-        "available": True,
-        "best_bid": book.best_bid,
-        "best_ask": book.best_ask,
-        "mid": book.mid,
-        "spread": book.spread,
-        "bid_depth": bid_depth,
-        "ask_depth": ask_depth,
-        "depth_imbalance": imbalance,
-        "n_bids": len(book.bids),
-        "n_asks": len(book.asks),
-    }
-    text = (
-        f"Order book: bid {book.best_bid} / ask {book.best_ask} "
-        f"(mid {book.mid:.3f}, spread {book.spread:.3f}). "
-        f"Top-{depth} depth bid {bid_depth:,.0f} vs ask {ask_depth:,.0f} "
-        f"(imbalance {imbalance:+.0%})."
-        if book.mid is not None
-        else f"Order book: {len(book.bids)} bids / {len(book.asks)} asks (incomplete top of book)."
-    )
-    return text, data
+    data = compute_microstructure(book)
+    return format_microstructure_report(data), data
 
 
 # ----- trade flow -----------------------------------------------------------
@@ -193,18 +175,30 @@ def get_trades_flow_report(
 
 # ----- news -----------------------------------------------------------------
 
-def get_news_report(news_client: NewsClient, question: str, max_results: int = 5) -> tuple[str, dict[str, Any]]:
+def get_news_report(
+    news_client: NewsClient,
+    question: str,
+    max_results: int = 5,
+    scorer: SentimentScorer | None = None,
+) -> tuple[str, dict[str, Any]]:
+    scorer = scorer or LexiconSentimentScorer()
+    neutral = {"n_scored": 0, "mean": 0.0, "label": "neutral", "scores": []}
     if not news_client.enabled:
-        return "News disabled (no TAVILY_API_KEY).", {"enabled": False, "n_items": 0}
+        return "News disabled (no TAVILY_API_KEY).", {"enabled": False, "n_items": 0, "sentiment": neutral}
     items = news_client.search(question, max_results=max_results)
+    sentiment = aggregate_sentiment([f"{i.title}. {i.snippet}" for i in items], scorer)
     data = {
         "enabled": True,
         "n_items": len(items),
-        "items": [{"title": i.title, "url": i.url, "published": i.published} for i in items],
+        "sentiment": sentiment,
+        "items": [
+            {"title": i.title, "url": i.url, "published": i.published, "sentiment": scorer.score(f"{i.title}. {i.snippet}")}
+            for i in items
+        ],
     }
     if not items:
         return f"No recent news found for: {question}", data
-    lines = [f"News for: {question}"]
+    lines = [f"News for: {question}  (sentiment: {sentiment['label']} {sentiment['mean']:+.2f})"]
     for i in items:
         when = f" ({i.published})" if i.published else ""
         lines.append(f"- {i.title}{when}: {i.snippet}")

@@ -39,14 +39,16 @@ def test_volume_reconstructed_from_trades(fake_client):
     assert data["bars_with_volume"] >= 1
 
 
-def test_orderbook_report_computes_imbalance(fake_client):
+def test_orderbook_report_computes_microstructure(fake_client):
     text, data = get_orderbook_report(fake_client, TOKEN)
     assert data["available"] is True
     assert data["best_bid"] == 0.44
     assert data["best_ask"] == 0.46
     assert data["mid"] == 0.45
-    # bid depth 300 vs ask depth 200 -> positive imbalance
-    assert data["depth_imbalance"] > 0
+    # bid depth 300 vs ask depth 200 -> positive book pressure
+    assert data["book_pressure"] > 0
+    assert data["micro_price"] is not None
+    assert data["spread_bps"] > 0
 
 
 def test_trades_flow_imbalance_and_token_filter(fake_client):

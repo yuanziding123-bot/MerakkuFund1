@@ -33,9 +33,10 @@ class MarketState(MessagesState):
     # --- data-collection reports (filled by collector nodes) ---
     price_report: Annotated[str, "Price-history summary"]
     volume_report: Annotated[str, "Reconstructed-volume summary"]
-    orderbook_report: Annotated[str, "Order-book depth / spread summary"]
+    orderbook_report: Annotated[str, "L2 microstructure summary (depth, micro-price, pressure)"]
     trades_flow_report: Annotated[str, "Buy/sell flow-imbalance summary"]
-    news_report: Annotated[str, "Relevant news summary"]
+    news_report: Annotated[str, "Relevant news summary with sentiment"]
+    features_report: Annotated[str, "Consolidated factor vector summary"]
 
     # --- structured numbers, keyed by source (e.g. raw["price"], raw["orderbook"]) ---
     raw: Annotated[dict[str, Any], "Structured numeric outputs from each collector"]
@@ -58,5 +59,6 @@ def build_initial_state(market: Market, as_of: str) -> dict[str, Any]:
         "orderbook_report": "",
         "trades_flow_report": "",
         "news_report": "",
+        "features_report": "",
         "raw": {},
     }

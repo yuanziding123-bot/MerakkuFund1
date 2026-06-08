@@ -13,6 +13,10 @@ env/
 # Secrets / local config
 .env
 
+# Local planning / strategy docs — keep private, do not publish
+Merakku-AI-Hedge-Fund-*.md
+*方案*.md
+
 # OS / editor
 .DS_Store
 .idea/

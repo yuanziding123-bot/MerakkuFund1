@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from polyagents.dataflows.forecaster import CandleForecaster, NullForecaster
 from polyagents.dataflows.news import NewsClient
 from polyagents.dataflows.polymarket_client import PolymarketDataClient
+from polyagents.dataflows.sentiment import LexiconSentimentScorer, SentimentScorer
 from polyagents.dataflows.types import Market
 from polyagents.dataflows.utils import utcnow
 from polyagents.default_config import DEFAULT_CONFIG
@@ -24,11 +26,22 @@ from .state import build_initial_state
 
 
 class PolyAgentsGraph:
-    def __init__(self, config: dict | None = None) -> None:
+    def __init__(
+        self,
+        config: dict | None = None,
+        scorer: SentimentScorer | None = None,
+        forecaster: CandleForecaster | None = None,
+    ) -> None:
         self.config = config or DEFAULT_CONFIG.copy()
         self.client = PolymarketDataClient.from_config(self.config)
         self.news_client = NewsClient(self.config.get("tavily_api_key"))
-        self.graph = build_data_collection_graph(self.client, self.news_client, self.config)
+        # FinGPT / Kronos seams — swap these for model-backed implementations later.
+        self.scorer = scorer or LexiconSentimentScorer()
+        self.forecaster = forecaster or NullForecaster()
+        self.graph = build_data_collection_graph(
+            self.client, self.news_client, self.config,
+            scorer=self.scorer, forecaster=self.forecaster,
+        )
 
     def collect(self, market: Market, as_of: str | None = None) -> dict[str, Any]:
         """Run the data-collection graph for one market; return the final state."""
@@ -56,6 +69,7 @@ def _format_state(state: dict[str, Any]) -> str:
         f"\n[orderbook]\n{state['orderbook_report']}",
         f"\n[trades_flow]\n{state['trades_flow_report']}",
         f"\n[news]\n{state['news_report']}",
+        f"\n[features]\n{state['features_report']}",
     ]
     return "\n".join(lines)
 

@@ -14,18 +14,25 @@ def test_graph_populates_all_reports(fake_client, sample_market):
 
     final = graph.invoke(build_initial_state(sample_market, as_of="2026-06-07T00:00:00+00:00"))
 
-    # Every collector wrote its report...
-    for key in ("price_report", "volume_report", "orderbook_report", "trades_flow_report", "news_report"):
+    # Every collector wrote its report (incl. the new features join)...
+    for key in ("price_report", "volume_report", "orderbook_report",
+                "trades_flow_report", "news_report", "features_report"):
         assert final[key], f"{key} should be non-empty"
 
     # ...and its structured numbers under raw.
-    for key in ("price", "volume", "orderbook", "trades_flow", "news"):
+    for key in ("price", "volume", "orderbook", "trades_flow", "news", "features"):
         assert key in final["raw"], f"raw['{key}'] missing"
 
     # Spot-check that numbers flowed through, not just strings.
     assert final["raw"]["trades_flow"]["n_trades"] == 3
-    assert final["raw"]["orderbook"]["mid"] == 0.45
+    assert final["raw"]["orderbook"]["mid"] == 0.45            # microstructure
+    assert "book_pressure" in final["raw"]["orderbook"]
     assert final["raw"]["volume"]["total_volume"] == 180.0
+    assert "sentiment" in final["raw"]["news"]                 # FinGPT seam
+    # features join consolidated every source into one factor vector
+    feats = final["raw"]["features"]["factors"]
+    assert feats["flow_imbalance"] == final["raw"]["trades_flow"]["flow_imbalance"]
+    assert feats["book_pressure"] == final["raw"]["orderbook"]["book_pressure"]
     assert final["market_context"]  # identity resolved at seed time
 
 
