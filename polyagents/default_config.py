@@ -86,4 +86,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
 
     # News API key — read from env, never hard-coded
     "tavily_api_key": os.getenv("TAVILY_API_KEY"),
+
+    # MCP servers exposed to runtime agents (mirrors .mcp.json used by Claude
+    # Code at dev-time). The Polymarket docs MCP is a documentation search/read
+    # server — see polyagents/mcp_tools.py.
+    "mcp_servers": {
+        "polymarket-docs": {
+            "url": "https://docs.polymarket.com/mcp",
+            "transport": "streamable_http",
+        },
+    },
 })

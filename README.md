@@ -37,6 +37,24 @@ swaps the lightweight built-ins for model-backed implementations without touchin
 The order book uses the official SDK by default (no keys needed for public L1 reads);
 set `use_clob_sdk: False` in config to force the REST path.
 
+### Polymarket docs MCP
+
+The official [Polymarket documentation MCP](https://docs.polymarket.com/mcp) (a
+docs **search/read** server — not a market-data feed) is wired in two ways:
+
+- **Dev-time** — [`.mcp.json`](.mcp.json) registers it with Claude Code so the
+  coding agent can look up Polymarket API/contract details while building polyagents.
+- **Run-time** — `polyagents/mcp_tools.py` turns it into LangGraph tools via
+  `langchain-mcp-adapters`, for the later decision-layer agents:
+
+  ```python
+  from polyagents.mcp_tools import load_mcp_tools_sync
+  tools = load_mcp_tools_sync()   # [search_polymarket_documentation, query_docs_filesystem...]
+  ```
+
+  Servers are configured under `mcp_servers` in `default_config.py`; an empty map
+  short-circuits with no network call and no extra imports.
+
 ## Layout
 
 ```
@@ -52,6 +70,7 @@ polyagents/
     features.py            # Alpha DevBox-inspired factor join
     interface.py           # high-level fetch+format functions (report + structured data)
     types.py               # Market / Candle / OrderBook domain types
+  mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   graph/
     state.py               # MarketState TypedDict + initial-state builder
     data_collection.py     # collector node factories (incl. features join)
