@@ -27,10 +27,12 @@ class MarketState(MessagesState):
     question: Annotated[str, "Market question"]
     outcome: Annotated[str, "Analysed side: YES or NO"]
     market_price: Annotated[float, "Last market price for the analysed side"]
+    liquidity: Annotated[float, "Market liquidity (USDC) — risk gate input"]
+    volume_24h: Annotated[float, "24h volume (USDC)"]
     as_of: Annotated[str, "ISO timestamp the collection run was anchored to"]
     market_context: Annotated[str, "Deterministic market identity block"]
 
-    # --- data-collection reports (filled by collector nodes) ---
+    # --- Layer 1: data-collection reports (filled by collector nodes) ---
     price_report: Annotated[str, "Price-history summary"]
     volume_report: Annotated[str, "Reconstructed-volume summary"]
     orderbook_report: Annotated[str, "L2 microstructure summary (depth, micro-price, pressure)"]
@@ -40,6 +42,14 @@ class MarketState(MessagesState):
 
     # --- structured numbers, keyed by source (e.g. raw["price"], raw["orderbook"]) ---
     raw: Annotated[dict[str, Any], "Structured numeric outputs from each collector"]
+
+    # --- Layer 2: decision engine (signal -> decision -> reflection) ---
+    signal: Annotated[Any, "Signal agent output (Signal)"]
+    signal_report: Annotated[str, "Signal summary"]
+    trade_decision: Annotated[Any, "Decision agent output (TradeDecision)"]
+    decision_report: Annotated[str, "Decision summary"]
+    reflection: Annotated[Any, "Reflection agent output (Reflection)"]
+    reflection_report: Annotated[str, "Reflection summary"]
 
 
 def build_initial_state(market: Market, as_of: str) -> dict[str, Any]:
@@ -52,6 +62,8 @@ def build_initial_state(market: Market, as_of: str) -> dict[str, Any]:
         "question": market.question,
         "outcome": market.outcome,
         "market_price": market.price,
+        "liquidity": market.liquidity,
+        "volume_24h": market.volume_24h,
         "as_of": as_of,
         "market_context": get_market_context(market),
         "price_report": "",

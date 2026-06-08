@@ -87,6 +87,19 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # News API key — read from env, never hard-coded
     "tavily_api_key": os.getenv("TAVILY_API_KEY"),
 
+    # Layer 2 — decision engine (risk embedded in the decision agent).
+    # Constants mirror the polymarket reference repo.
+    "bankroll_usdc": 500.0,           # capital base for sizing
+    "edge_floor": 0.06,               # min |p_true - price| to act (6%)
+    "kelly_multiplier": 0.25,         # fractional (quarter) Kelly
+    "max_position_fraction": 0.05,    # hard cap: 5% of bankroll per trade
+    "min_liquidity_usdc": 5000.0,     # risk gate: skip thin markets
+    "max_spread_bps": 300.0,          # risk gate: skip wide spreads
+
+    # LLM for the signal + reflection agents (decision agent is deterministic).
+    "anthropic_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "anthropic_temperature": 0.0,
+
     # MCP servers exposed to runtime agents (mirrors .mcp.json used by Claude
     # Code at dev-time). The Polymarket docs MCP is a documentation search/read
     # server — see polyagents/mcp_tools.py.

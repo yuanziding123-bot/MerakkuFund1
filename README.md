@@ -7,18 +7,20 @@ graph nodes, each node reads it, does its job, and writes a partial update back
 — while the data logic is adapted from the proven
 [polymarket](../) reference implementation.
 
-The project is being built layer by layer. **This is the data-collection layer
-(Layer 1)**: deterministic nodes that gather everything about one market into a
-typed state. Decision / risk / reflection agents come in later layers.
+The project is built layer by layer. **Layer 1** (data collection) gathers
+everything about one market into a typed state; **Layer 2** (decision engine)
+turns that into a sized, risk-gated trade. The execution + feedback layers come
+next.
 
 ```
-                              ┌──────────── MarketState (blackboard) ───────────┐
-START ─► market_data ─► orderbook ─► trades_flow ─► news ─► features ─► END
-          collector      collector    collector    collector  (join)
-            │               │            │            │          │
-        price_report    orderbook_   trades_flow_  news_report  features_report
-        volume_report     report        report     (+sentiment) (factor vector)
+   ── Layer 1: data collection (deterministic) ──┐  ┌── Layer 2: decision engine ──
+START ► market_data ► orderbook ► trades_flow ► news ► features ► signal ► decision ► reflection ► END
+          price/        L2 micro-   buy/sell      (+senti-  factor    LLM       Kelly +    LLM self-
+          volume        structure   flow          ment)     vector    p_true    risk gate  critique
 ```
+
+`collect(market)` runs Layer 1 only (no LLM/keys); `analyze(market)` runs the
+full pipeline (Layer 2 needs an Anthropic key, or inject an `llm`).
 
 ### Layer 1 capabilities (tracking the Merakku v3.0 Layer 1 projects)
 
@@ -36,6 +38,28 @@ The FinGPT and Kronos seams are **injectable**: `PolyAgentsGraph(scorer=..., for
 swaps the lightweight built-ins for model-backed implementations without touching the graph.
 The order book uses the official SDK by default (no keys needed for public L1 reads);
 set `use_clob_sdk: False` in config to force the REST path.
+
+### Layer 2 — decision engine (Merakku v3.0 three-agent architecture)
+
+| Agent | Role | How | Module |
+|---|---|---|---|
+| **Signal** | factors + flow + sentiment → estimated true probability (`p_true`, direction, conviction) | LLM (Claude), structured output | `agents/signal_agent.py` |
+| **Decision** | edge vs price → fractional-Kelly size + hard risk gates (liquidity, spread, edge floor) | **deterministic** (risk embedded, auditable) | `agents/decision_agent.py`, `agents/risk.py` |
+| **Reflection** | pre-trade self-critique: risk flags, shaky assumptions, OOD | LLM (Claude), structured output | `agents/reflection_agent.py` |
+
+The decision agent is intentionally **not** an LLM — sizing and risk are math
+(`edge = p_true − price`, `f* = (q−p)/(1−p)`, quarter-Kelly capped at 5% of
+bankroll, 6% edge floor; constants mirror the polymarket reference repo). The
+`llm` is injectable: `PolyAgentsGraph(llm=...)`, and tests use a fake LLM so the
+whole pipeline runs without a key or network.
+
+```python
+from polyagents.graph.orchestrator import PolyAgentsGraph
+ta = PolyAgentsGraph()                 # needs ANTHROPIC_API_KEY for analyze()
+market = ta.most_active_market()
+state = ta.analyze(market)             # signal -> decision -> reflection
+print(state["decision_report"])
+```
 
 ### Polymarket docs MCP
 
@@ -70,12 +94,18 @@ polyagents/
     features.py            # Alpha DevBox-inspired factor join
     interface.py           # high-level fetch+format functions (report + structured data)
     types.py               # Market / Candle / OrderBook domain types
+  agents/                  # Layer 2 — decision engine
+    schemas.py             # Signal / Reflection (pydantic) + TradeDecision
+    signal_agent.py        # LLM: estimate true probability
+    decision_agent.py      # deterministic: edge + Kelly + risk gates
+    risk.py                # pure risk math (edge, Kelly fraction)
+    reflection_agent.py    # LLM: pre-trade self-critique
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   graph/
-    state.py               # MarketState TypedDict + initial-state builder
+    state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder
     data_collection.py     # collector node factories (incl. features join)
-    setup.py               # builds the data-collection StateGraph
-    orchestrator.py        # PolyAgentsGraph — the run entrypoint
+    setup.py               # build_data_collection_graph (L1) + build_analysis_graph (L1+L2)
+    orchestrator.py        # PolyAgentsGraph — collect() (L1) / analyze() (L1+L2)
 ```
 
 ## Quick start

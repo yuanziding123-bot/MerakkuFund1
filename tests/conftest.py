@@ -65,6 +65,45 @@ def fake_client() -> FakeClient:
     return FakeClient()
 
 
+# --- Layer 2: a fake LLM that returns preset structured outputs --------------
+
+class _Structured:
+    def __init__(self, obj):
+        self._obj = obj
+
+    def invoke(self, _prompt):
+        return self._obj
+
+
+class FakeLLM:
+    """Mimics the bit the agents use: ``with_structured_output(Schema).invoke``."""
+
+    def __init__(self, signal, reflection):
+        self._signal = signal
+        self._reflection = reflection
+
+    def with_structured_output(self, schema):
+        from polyagents.agents.schemas import Reflection, Signal
+
+        if schema is Signal:
+            return _Structured(self._signal)
+        if schema is Reflection:
+            return _Structured(self._reflection)
+        raise AssertionError(f"unexpected schema {schema}")
+
+
+@pytest.fixture
+def fake_llm():
+    from polyagents.agents.schemas import Reflection, Signal
+
+    return FakeLLM(
+        signal=Signal(direction="yes", p_true=0.70, conviction="high",
+                      rationale="Heavy bid pressure and positive flow."),
+        reflection=Reflection(assessment="Reasonable given the flow.",
+                              risk_flags=["short price history"], confidence="medium"),
+    )
+
+
 @pytest.fixture
 def sample_market() -> Market:
     return Market(
