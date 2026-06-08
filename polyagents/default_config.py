@@ -71,8 +71,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Market discovery
     "markets_limit": 500,             # how many active markets to page from Gamma
 
-    # Price history
-    "price_interval": "1h",           # bucket size requested from prices-history
+    # Price history. ``price_interval`` is the *total range* requested from
+    # prices-history (not the bar size), so "1h" returns only ~the last hour
+    # (1-2 bars). Use "1w" for a week of hourly bars (~168) so momentum /
+    # volatility / volume-spike factors have enough history (they look back
+    # 60-120 bars). Options: 1h, 6h, 1d, 1w, max.
+    "price_interval": "1w",
     "price_fidelity": 60,             # minutes per point
 
     # Trade-flow window

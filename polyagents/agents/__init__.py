@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from .decision_agent import create_decision_agent, decide
 from .reflection_agent import create_reflection_agent
-from .risk import edge_for_side, kelly_fraction
+from .risk import edge_for_side, effective_market_price, kelly_fraction
 from .schemas import Reflection, Signal, TradeDecision
 from .signal_agent import create_signal_agent
 
@@ -22,5 +22,6 @@ __all__ = [
     "create_reflection_agent",
     "decide",
     "edge_for_side",
+    "effective_market_price",
     "kelly_fraction",
 ]

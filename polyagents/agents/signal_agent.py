@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from .risk import effective_market_price
 from .schemas import Signal
 
 Node = Callable[[dict], dict]
@@ -27,6 +28,7 @@ from priors. Return your estimate as structured output."""
 def _build_prompt(state: dict) -> str:
     raw = state.get("raw", {})
     factors = (raw.get("features", {}) or {}).get("factors", {})
+    price, price_source = effective_market_price(state)
     return (
         f"{_SYSTEM}\n\n"
         f"=== Market ===\n{state.get('market_context', '')}\n\n"
@@ -36,7 +38,7 @@ def _build_prompt(state: dict) -> str:
         f"=== Trade flow ===\n{state.get('trades_flow_report', '')}\n"
         f"=== News ===\n{state.get('news_report', '')}\n\n"
         f"=== Factor vector ===\n{factors}\n\n"
-        f"Current market price for the analysed side: {state.get('market_price')}.\n"
+        f"Current tradeable price for the analysed side: {price:.3f} ({price_source}).\n"
         f"Give p_true (0-1), a direction, conviction, and a short rationale."
     )
 

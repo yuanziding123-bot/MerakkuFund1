@@ -4,9 +4,19 @@ from __future__ import annotations
 from pytest import approx
 
 from polyagents.agents.decision_agent import decide
-from polyagents.agents.risk import edge_for_side, kelly_fraction
+from polyagents.agents.risk import edge_for_side, effective_market_price, kelly_fraction
 from polyagents.agents.schemas import Signal
 from polyagents.default_config import DEFAULT_CONFIG
+
+
+def test_effective_price_prefers_live_book_mid():
+    # live book mid present -> use it (not the stale snapshot)
+    state = {"market_price": 0.69, "raw": {"orderbook": {"mid": 0.735}}}
+    price, source = effective_market_price(state)
+    assert price == 0.735 and source == "live book mid"
+    # no book -> fall back to the snapshot price
+    price, source = effective_market_price({"market_price": 0.69, "raw": {}})
+    assert price == 0.69 and source == "market snapshot"
 
 
 def _cfg():

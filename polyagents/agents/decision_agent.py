@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .risk import edge_for_side, kelly_fraction
+from .risk import edge_for_side, effective_market_price, kelly_fraction
 from .schemas import Signal, TradeDecision
 
 Node = Callable[[dict], dict]
@@ -74,7 +74,9 @@ def create_decision_agent(config: dict) -> Node:
         ob = raw.get("orderbook", {}) or {}
         spread_bps = ob.get("spread_bps")
         liquidity = float(state.get("liquidity", 0.0) or 0.0)
-        decision = decide(signal, state["market_price"], liquidity, spread_bps, config)
+        price, price_source = effective_market_price(state)
+        decision = decide(signal, price, liquidity, spread_bps, config)
+        decision.reasons.insert(0, f"price {price:.3f} ({price_source})")
         return {"trade_decision": decision, "decision_report": _format_decision_report(decision)}
 
     return node

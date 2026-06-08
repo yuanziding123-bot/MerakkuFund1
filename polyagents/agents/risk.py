@@ -8,6 +8,20 @@ reference repo (6% edge floor, quarter Kelly, 5% position cap).
 from __future__ import annotations
 
 
+def effective_market_price(state: dict) -> tuple[float, str]:
+    """The price to evaluate against: the live order-book mid, else the snapshot.
+
+    The Gamma ``market_price`` seeded at run start can lag the live CLOB book
+    (we've seen 0.69 vs a 0.735 book mid), which inflates the apparent edge. The
+    book mid is the real, tradeable reference, so prefer it when available.
+    """
+    ob = (state.get("raw", {}) or {}).get("orderbook", {}) or {}
+    mid = ob.get("mid")
+    if mid is not None:
+        return float(mid), "live book mid"
+    return float(state.get("market_price", 0.0) or 0.0), "market snapshot"
+
+
 def edge_for_side(p_true: float, market_price: float) -> float:
     """Edge from buying the analysed side: estimated prob minus its price.
 
