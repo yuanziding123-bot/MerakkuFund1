@@ -33,7 +33,7 @@ Layer 4 once markets resolve.
 | Source project | What we built | Module |
 |---|---|---|
 | **Polymarket py-clob-client** (P0) | Order book read via the **official CLOB SDK** (richer L2 depth), public REST `/book` as fallback | `dataflows/polymarket_client.py` |
-| **MarketLens** (P0) | L2 microstructure: size-weighted micro-price, multi-level depth imbalance, book pressure, spread (bps), queue-at-touch | `dataflows/microstructure.py` |
+| **MarketLens** (P0) | (a) native L2 microstructure on the live book — micro-price, depth imbalance, book pressure, spread (bps), queue-at-touch; (b) **MarketLens SDK adapter** for tick-level *historical* L2 (resolved markets / backtesting) — needs `MARKETLENS_API_KEY` | `dataflows/microstructure.py`, `dataflows/marketlens_client.py` |
 | **FinGPT** (P0) | Sentiment scoring on news; `SentimentScorer` protocol + deterministic lexicon default, LLM/FinGPT pluggable | `dataflows/sentiment.py` |
 | **Alpha DevBox** (P0) | Deterministic factor extraction — joins every collector's output into one named factor vector | `dataflows/features.py` |
 | **Kronos** (P3) | `CandleForecaster` protocol seam over the close series; `NullForecaster` default | `dataflows/forecaster.py` |
@@ -159,7 +159,8 @@ polyagents/
     polymarket_client.py   # Gamma + data-api over httpx; order book via official py-clob-client SDK
     news.py                # Tavily news search (graceful no-key fallback)
     volume.py              # rebuild candle volume from /trades
-    microstructure.py      # MarketLens-inspired L2 features
+    microstructure.py      # MarketLens-inspired L2 features (on the live book)
+    marketlens_client.py   # MarketLens SDK adapter — historical L2 for resolved markets (needs key)
     sentiment.py           # FinGPT-inspired sentiment scorer (pluggable)
     forecaster.py          # Kronos-inspired CandleForecaster seam
     features.py            # Alpha DevBox-inspired factor join

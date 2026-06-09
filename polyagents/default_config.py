@@ -96,6 +96,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
 
     # News API key — read from env, never hard-coded
     "tavily_api_key": os.getenv("TAVILY_API_KEY"),
+    # MarketLens (tick-level L2 history / backtesting) — needs a paid key.
+    "marketlens_api_key": os.getenv("MARKETLENS_API_KEY"),
 
     # Layer 2 — decision engine (risk embedded in the decision agent).
     # Constants mirror the polymarket reference repo.
