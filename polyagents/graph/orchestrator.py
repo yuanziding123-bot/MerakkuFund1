@@ -165,9 +165,11 @@ class PolyAgentsGraph:
 
     # ----- Layer 4: feedback loop -------------------------------------------
 
-    def settle(self) -> list[dict]:
+    def settle(self, reflect: bool = True) -> list[dict]:
         """Resolve pending trades whose markets have closed: settle the paper
-        position, book realised P&L, and write a reflection lesson to memory.
+        position, book realised P&L, and (when ``reflect``) write a reflection
+        lesson to memory. Set ``reflect=False`` to skip the LLM (e.g. when the
+        MCP host agent does its own reflection — no internal key needed).
         Returns the records that were settled this pass."""
         settled: list[dict] = []
         for rec in self.memory.pending():
@@ -191,11 +193,13 @@ class PolyAgentsGraph:
                 "realized_pnl": pnl, "realized_return": ret,
             }
             rec.update(updates)
-            try:
-                lesson = reflect_on_outcome(self._get_llm(), rec)
-                updates["lesson"] = f"{lesson.summary} Next time: {lesson.what_to_change}"
-            except Exception:
-                updates["lesson"] = None
+            updates["lesson"] = None
+            if reflect:
+                try:
+                    lesson = reflect_on_outcome(self._get_llm(), rec)
+                    updates["lesson"] = f"{lesson.summary} Next time: {lesson.what_to_change}"
+                except Exception:
+                    updates["lesson"] = None
             self.memory.update(rec["record_id"], **updates)
             settled.append({**rec, **updates})
         return settled

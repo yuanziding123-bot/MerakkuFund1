@@ -158,6 +158,34 @@ docs **search/read** server — not a market-data feed) is wired in two ways:
   Servers are configured under `mcp_servers` in `default_config.py`; an empty map
   short-circuits with no network call and no extra imports.
 
+## Platform integration — polyagents as skills + MCP
+
+polyagents is also packaged as **skills + an MCP server** so it can plug into an
+Alpha DevBox-style chat platform: the platform hosts a Claude agent, the agent
+loads the **skill** and connects to the **MCP server**, and the user trades
+through chat. The platform is the shell; polyagents provides the capabilities.
+
+```
+chat (Alpha DevBox)  →  agent (Claude)  →  skills/*  +  polyagents MCP tools
+```
+
+- **MCP server** — `polyagents/mcp_server.py` (`FastMCP`) exposes the engine as
+  deterministic, JSON-returning tools: `scan_markets`, `market_snapshot`,
+  `find_similar_markets`, `size_position` (Kelly + risk gates), `paper_execute`
+  (circuit-breaker gated), `portfolio_status`, `settle_markets`, `pnl_report`.
+  The **host agent does the reasoning**; the tools need no internal LLM/key.
+
+  ```bash
+  python -m polyagents.mcp_server         # stdio (Claude / Alpha DevBox)
+  python -m polyagents.mcp_server --http   # streamable-http on :8000
+  ```
+
+- **Skills** — `skills/<name>/SKILL.md` teaches the agent the workflow (scan →
+  snapshot → estimate p_true → size → paper-trade → settle/review) and the
+  discipline. Ships with `skills/polymarket-trading/`. Adding a skill = expose a
+  few more `@mcp.tool()`s + write one `SKILL.md` — see `skills/README.md`.
+  Everything is paper / read-only by default.
+
 ## Layout
 
 ```
@@ -196,11 +224,16 @@ polyagents/
   rag/
     store.py               # ChromaDB RAG over markets (Polymarket/agents-style retrieval)
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
+  mcp_server.py            # FastMCP server: expose the engine as tools for a host platform
   graph/
     state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder
     data_collection.py     # collector node factories (incl. features join)
     setup.py               # build_data_collection_graph / _analysis_graph / _trading_graph
     orchestrator.py        # PolyAgentsGraph — collect() / analyze() / trade()
+skills/
+  README.md                # how to add skills (expose @mcp.tool + write SKILL.md)
+  polymarket-trading/
+    SKILL.md               # the trading workflow + discipline for the host agent
 ```
 
 ## Quick start
