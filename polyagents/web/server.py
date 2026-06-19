@@ -50,6 +50,33 @@ async def portfolio() -> JSONResponse:
         return JSONResponse({"error": str(exc)})
 
 
+@app.get("/api/markets")
+async def markets(limit: int = 40, min_volume: float = 20000.0) -> JSONResponse:
+    """Live Polymarket markets (one row per market, YES+NO prices) for the Market
+    tab. Uses polyagents' own data layer — no external market-data MCP needed."""
+    try:
+        eng = mcp_server.engine()
+        raw = eng.client.list_active_markets(limit=eng.config["markets_limit"])
+        by_cond: dict[str, dict] = {}
+        for m in eng.client.to_markets(raw):
+            row = by_cond.setdefault(m.condition_id, {
+                "question": m.question, "condition_id": m.condition_id,
+                "volume_24h": m.volume_24h, "liquidity": m.liquidity,
+                "spread": m.spread, "days_to_expiry": round(m.days_to_expiry, 1),
+                "yes_price": None, "no_price": None, "yes_token": None, "no_token": None,
+            })
+            if m.outcome == "YES":
+                row["yes_price"], row["yes_token"] = m.price, m.token_id
+            else:
+                row["no_price"], row["no_token"] = m.price, m.token_id
+        rows = [r for r in by_cond.values()
+                if r["volume_24h"] >= min_volume and (r["yes_price"] or 0) > 0.005]
+        rows.sort(key=lambda r: r["volume_24h"], reverse=True)
+        return JSONResponse(rows[:limit])
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)})
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 

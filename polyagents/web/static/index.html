@@ -82,14 +82,27 @@
   .green{color:var(--accent)} .red{color:#ff6b7a}
   .refresh{float:right;color:var(--muted);cursor:pointer;font-size:12px}
   .refresh:hover{color:var(--text)}
+  /* market view */
+  #chatView{display:flex;flex-direction:column;flex:1;min-height:0}
+  #marketView{display:none;flex:1;overflow-y:auto;padding:16px 18px}
+  .mkthead{color:var(--muted);font-size:12px;margin-bottom:10px}
+  table.mkt{width:100%;border-collapse:collapse;font-size:13px}
+  .mkt th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;
+       letter-spacing:.5px;padding:7px 8px;border-bottom:1px solid var(--line);position:sticky;top:-16px;background:var(--bg)}
+  .mkt td{padding:9px 8px;border-bottom:1px solid var(--line)}
+  .mkt tbody tr{cursor:pointer}
+  .mkt tbody tr:hover{background:var(--panel2)}
+  .mkt .q{max-width:360px;color:var(--text)}
+  .mkt .px{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
+  .mkt .yes{color:var(--accent)} .mkt .no{color:#ff9aa6}
 </style>
 </head>
 <body>
   <div class="topnav">
     <div class="brand"><div class="logo"></div> polyagents</div>
     <div class="tabs">
-      <div class="tab active">Chat</div>
-      <div class="tab soon" title="coming soon">Market</div>
+      <div class="tab active" id="tab-chat" onclick="showTab('chat')">Chat</div>
+      <div class="tab" id="tab-market" onclick="showTab('market')">Market</div>
       <div class="tab soon" title="coming soon">Events</div>
     </div>
     <div class="spacer"></div>
@@ -106,8 +119,9 @@
       <div class="hist" id="hist">This conversation</div>
     </aside>
 
-    <!-- CENTER: chat -->
+    <!-- CENTER: chat + market views -->
     <div class="center">
+      <div id="chatView">
       <div id="log"><div class="wrap">
         <div class="empty" id="empty">
           <h2>What should we trade today?</h2>
@@ -124,6 +138,16 @@
         <textarea id="input" rows="1" placeholder="Message the trading agent…"></textarea>
         <button class="send" id="send">Send</button>
       </div></div>
+      </div><!-- /chatView -->
+
+      <div id="marketView">
+        <div class="mkthead">Live Polymarket markets · sorted by 24h volume
+          <span class="refresh" onclick="loadMarkets()">⟳ refresh</span></div>
+        <table class="mkt">
+          <thead><tr><th>Question</th><th>YES</th><th>NO</th><th>24h Vol</th><th>Liquidity</th><th>Spread</th><th>Expiry</th></tr></thead>
+          <tbody id="mktbody"><tr><td colspan="7" class="hist">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- RIGHT: portfolio -->
@@ -240,6 +264,47 @@ async function send(){
   busy=false; sendBtn.disabled=false; input.focus();
   loadPortfolio();                              // refresh after each turn
 }
+
+// ---- market view ----
+let marketRows = [];
+let marketTimer = null;
+function showTab(t){
+  const chat = (t === 'chat');
+  document.getElementById('chatView').style.display = chat ? 'flex' : 'none';
+  document.getElementById('marketView').style.display = chat ? 'none' : 'block';
+  document.getElementById('tab-chat').classList.toggle('active', chat);
+  document.getElementById('tab-market').classList.toggle('active', !chat);
+  if(!chat){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }
+  else if(marketTimer){ clearInterval(marketTimer); marketTimer = null; }
+}
+async function loadMarkets(){
+  const body = document.getElementById('mktbody');
+  try{
+    const rows = await (await fetch('/api/markets')).json();
+    if(rows.error){ body.innerHTML = '<tr><td colspan="7" class="hist">'+esc(rows.error)+'</td></tr>'; return; }
+    if(!rows.length){ body.innerHTML = '<tr><td colspan="7" class="hist">No markets</td></tr>'; return; }
+    marketRows = rows;
+    body.innerHTML = rows.map((r,i) => {
+      const exp = r.days_to_expiry<=0 ? 'expired' : (r.days_to_expiry+'d');
+      return `<tr onclick="analyseMarket(${i})">
+        <td class="q">${esc(r.question)}</td>
+        <td class="px yes">${cents(r.yes_price)}</td>
+        <td class="px no">${cents(r.no_price)}</td>
+        <td class="px">$${short(r.volume_24h)}</td>
+        <td class="px">$${short(r.liquidity)}</td>
+        <td class="px">${(((r.spread||0))*100).toFixed(1)}%</td>
+        <td class="px">${exp}</td></tr>`;
+    }).join('');
+  }catch(e){ body.innerHTML = '<tr><td colspan="7" class="hist">failed to load</td></tr>'; }
+}
+function analyseMarket(i){
+  const r = marketRows[i]; if(!r) return;
+  showTab('chat');
+  input.value = 'Analyse this market and estimate a fair probability: ' + r.question;
+  input.dispatchEvent(new Event('input')); input.focus();
+}
+function cents(p){ return p==null ? '—' : (p*100).toFixed(1)+'¢'; }
+function short(n){ n=Number(n||0); return n>=1e6 ? (n/1e6).toFixed(1)+'M' : (n>=1e3 ? (n/1e3).toFixed(0)+'K' : n.toFixed(0)); }
 
 loadSkills(); loadPortfolio();
 </script>
