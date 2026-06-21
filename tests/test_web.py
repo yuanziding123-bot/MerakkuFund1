@@ -8,7 +8,8 @@ def test_build_tools_exposes_the_trading_surface():
     names = {t.name for t in build_tools()}
     for expected in ("scan_markets", "market_snapshot", "size_position",
                      "paper_execute", "portfolio_status", "settle_markets",
-                     "pnl_report", "evaluation_report"):
+                     "pnl_report", "evaluation_report",
+                     "crypto_price", "crypto_24h", "crypto_klines"):
         assert expected in names
 
 
@@ -17,7 +18,7 @@ def test_skills_registry_lists_skill_folders():
 
     skills = list_skills()
     ids = {s["id"] for s in skills}
-    assert "polymarket-trading" in ids and "market-research" in ids
+    assert {"polymarket-trading", "market-research", "cross-market-arb"} <= ids
     pt = next(s for s in skills if s["id"] == "polymarket-trading")
     assert pt["name"] and pt["description"] and pt["body"]
 

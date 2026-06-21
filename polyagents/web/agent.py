@@ -16,11 +16,13 @@ from langchain_core.tools import StructuredTool
 
 from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
+from polyagents.mcp_servers import crypto as crypto_mcp
 
 _SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
 # Reuse the exact MCP tool functions so the web agent and an Alpha DevBox host
-# expose an identical surface (one source of truth).
+# expose an identical surface (one source of truth). Cross-market (crypto) tools
+# are included so the cross-market-arb skill can compare spot vs Polymarket.
 _TOOL_FUNCS = [
     mcp_server.scan_markets,
     mcp_server.market_snapshot,
@@ -31,6 +33,9 @@ _TOOL_FUNCS = [
     mcp_server.settle_markets,
     mcp_server.pnl_report,
     mcp_server.evaluation_report,
+    crypto_mcp.crypto_price,
+    crypto_mcp.crypto_24h,
+    crypto_mcp.crypto_klines,
 ]
 
 
