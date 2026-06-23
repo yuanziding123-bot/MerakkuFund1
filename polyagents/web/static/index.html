@@ -115,6 +115,43 @@
   .verdict.noise{background:#221317;border:1px solid #5a2530;color:#ff9aa6}
   .chartbox{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:12px}
   .chartbox .t{color:var(--muted);font-size:12px;margin-bottom:6px}
+  /* skills module */
+  .tabcount{display:inline-block;min-width:17px;text-align:center;font-size:10px;font-weight:700;
+       color:#04130d;background:var(--accent);border-radius:999px;padding:1px 5px;margin-left:5px}
+  .tab .tabcount{vertical-align:1px}
+  .manage{float:right;text-transform:none;letter-spacing:0;color:var(--accent2);cursor:pointer;font-size:11px}
+  .manage:hover{color:var(--accent)}
+  #skillsSummary .schip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--panel2);
+       border-radius:8px;padding:6px 9px;margin-bottom:6px;font-size:12px}
+  #skillsSummary .schip .dot{width:8px;height:8px;border-radius:3px;background:var(--accent);flex:0 0 8px}
+  #skillsSummary .none{color:var(--muted);font-size:12px;padding:4px}
+  #skillsView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  .sk-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}
+  .sk-title{margin:0 0 6px;font-size:26px;font-weight:700;letter-spacing:-.4px}
+  .sk-lead{margin:0;color:var(--muted);font-size:13px;max-width:640px;line-height:1.6}
+  .sk-counter{flex:0 0 auto;border:1px solid var(--line);background:var(--panel2);border-radius:10px;
+       padding:10px 14px;color:var(--muted);font-size:12px;white-space:nowrap}
+  .sk-counter b{color:var(--accent);font-size:18px}
+  .sk-cat{margin-bottom:22px}
+  .sk-cat-hd{display:flex;align-items:baseline;gap:10px;padding:0 2px 10px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .sk-cat-nm{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--text)}
+  .sk-cat-ct{font-size:11px;color:var(--muted)}
+  .sk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+  .sk-card{border:1px solid var(--line);background:var(--panel2);border-radius:14px;padding:16px;cursor:pointer;
+       transition:border-color .12s,box-shadow .12s}
+  .sk-card:hover{border-color:#2c3850}
+  .sk-card.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px rgba(52,211,154,.3)}
+  .sk-card .hd{display:flex;align-items:center;gap:9px}
+  .sk-card .ic{width:30px;height:30px;border-radius:9px;flex:0 0 30px;
+       background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;
+       justify-content:center;color:#04130d;font-weight:800;font-size:14px}
+  .sk-card .nm{font-weight:700;font-size:15px}
+  .sk-card .tick{margin-left:auto;width:22px;height:22px;border-radius:7px;border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;font-size:13px;color:transparent;flex:0 0 22px}
+  .sk-card.on .tick{background:var(--accent);border-color:var(--accent);color:#04130d}
+  .sk-card .ds{color:var(--muted);font-size:13px;margin-top:10px;line-height:1.55}
+  .sk-card .ft{margin-top:12px;font-size:11px;color:var(--accent2)}
+  .sk-card.on .ft{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -123,6 +160,7 @@
     <div class="tabs">
       <div class="tab active" id="tab-chat" onclick="showTab('chat')">Chat</div>
       <div class="tab" id="tab-market" onclick="showTab('market')">Market</div>
+      <div class="tab" id="tab-skills" onclick="showTab('skills')">Skills <span class="tabcount" id="skillCount">0</span></div>
       <div class="tab" id="tab-backtest" onclick="showTab('backtest')">Backtest</div>
     </div>
     <div class="spacer"></div>
@@ -133,8 +171,8 @@
     <!-- LEFT: new chat + skills + history -->
     <aside class="left">
       <button class="newchat" onclick="newChat()">＋ New chat</button>
-      <div class="label">Skills</div>
-      <div id="skills"></div>
+      <div class="label">Active skills <span class="manage" onclick="showTab('skills')">manage →</span></div>
+      <div id="skillsSummary"></div>
       <div class="label">MCP servers</div>
       <div id="mcp"></div>
       <div class="label">Chat history</div>
@@ -176,6 +214,17 @@
           <span class="refresh" onclick="loadBacktest()">▶ run backtest</span></div>
         <div id="btbody"><div class="hist">Click “run backtest”. Needs candle history in the DB and the qlib venv.</div></div>
       </div>
+
+      <div id="skillsView">
+        <div class="sk-top">
+          <div>
+            <h1 class="sk-title">Skills</h1>
+            <p class="sk-lead">Pick the skills that drive the agent. The selected skills' workflows become its system prompt; the most restrictive discipline wins when they overlap.</p>
+          </div>
+          <div class="sk-counter"><b id="skSelCount">0</b> selected</div>
+        </div>
+        <div id="skGrid"><div class="hist">Loading skills…</div></div>
+      </div>
     </div>
 
     <!-- RIGHT: portfolio -->
@@ -199,22 +248,58 @@ let history = [];
 let busy = false;
 let selected = new Set();
 
-// ---- skills ----
+// ---- skills (a dedicated module: browse the catalog, then select) ----
+let allSkills = [];
 async function loadSkills(){
-  const el = document.getElementById('skills');
+  const grid = document.getElementById('skGrid');
   try{
-    const skills = await (await fetch('/api/skills')).json();
-    el.innerHTML = '';
-    skills.forEach((s,i) => {
-      if(i===0) selected.add(s.id);            // default: first skill on
-      const d = document.createElement('div');
-      d.className = 'skill' + (selected.has(s.id)?' on':'');
-      d.innerHTML = `<div class="row"><div class="dot"></div><div class="nm">${esc(s.name)}</div></div><div class="ds">${esc(s.description||'')}</div>`;
-      d.onclick = () => { if(selected.has(s.id)) selected.delete(s.id); else selected.add(s.id);
-                          d.classList.toggle('on'); };
-      el.appendChild(d);
-    });
-  }catch(e){ el.innerHTML = '<div class="hist">skills unavailable</div>'; }
+    allSkills = await (await fetch('/api/skills')).json();
+    if(allSkills.length) selected.add(allSkills[0].id);   // default: first skill on
+    renderSkillGrid(); renderSkillsSummary();
+  }catch(e){ grid.innerHTML = '<div class="hist">skills unavailable</div>'; }
+}
+function skillCard(s){
+  const on = selected.has(s.id);
+  const initial = esc((s.name||s.id).trim().charAt(0).toUpperCase());
+  return `<div class="sk-card ${on?'on':''}" onclick="toggleSkill('${esc(s.id)}')">
+    <div class="hd">
+      <div class="ic">${initial}</div>
+      <div class="nm">${esc(s.name||s.id)}</div>
+      <div class="tick">✓</div>
+    </div>
+    <div class="ds">${esc(s.description||'')}</div>
+    <div class="ft">${on?'● active in chat':'click to enable'}</div>
+  </div>`;
+}
+function renderSkillGrid(){
+  const wrap = document.getElementById('skGrid');
+  if(!allSkills.length){ wrap.innerHTML = '<div class="hist">No skills found. Drop a skills/&lt;id&gt;/SKILL.md to add one.</div>'; return; }
+  // group by category, keep "General" last
+  const groups = {};
+  allSkills.forEach(s => { const c = s.category || 'General'; (groups[c] = groups[c] || []).push(s); });
+  const cats = Object.keys(groups).sort((a,b) =>
+    a==='General' ? 1 : b==='General' ? -1 : a.localeCompare(b));
+  wrap.innerHTML = cats.map(cat => {
+    const sel = groups[cat].filter(s => selected.has(s.id)).length;
+    return `<section class="sk-cat">
+      <div class="sk-cat-hd"><span class="sk-cat-nm">${esc(cat)}</span>
+        <span class="sk-cat-ct">${groups[cat].length} skill${groups[cat].length>1?'s':''}${sel?` · ${sel} on`:''}</span></div>
+      <div class="sk-grid">${groups[cat].map(skillCard).join('')}</div>
+    </section>`;
+  }).join('');
+}
+function toggleSkill(id){
+  if(selected.has(id)) selected.delete(id); else selected.add(id);
+  renderSkillGrid(); renderSkillsSummary();
+}
+function renderSkillsSummary(){
+  const el = document.getElementById('skillsSummary');
+  const chosen = allSkills.filter(s => selected.has(s.id));
+  el.innerHTML = chosen.length
+    ? chosen.map(s => `<div class="schip"><span class="dot"></span>${esc(s.name||s.id)}</div>`).join('')
+    : '<div class="none">None selected — open the Skills tab to choose.</div>';
+  document.getElementById('skillCount').textContent = chosen.length;
+  document.getElementById('skSelCount').textContent = chosen.length;
 }
 
 // ---- portfolio ----
@@ -300,8 +385,10 @@ function showTab(t){
   document.getElementById('chatView').style.display = t==='chat' ? 'flex' : 'none';
   document.getElementById('marketView').style.display = t==='market' ? 'block' : 'none';
   document.getElementById('backtestView').style.display = t==='backtest' ? 'block' : 'none';
+  document.getElementById('skillsView').style.display = t==='skills' ? 'block' : 'none';
   document.getElementById('tab-chat').classList.toggle('active', t==='chat');
   document.getElementById('tab-market').classList.toggle('active', t==='market');
+  document.getElementById('tab-skills').classList.toggle('active', t==='skills');
   document.getElementById('tab-backtest').classList.toggle('active', t==='backtest');
   if(marketTimer){ clearInterval(marketTimer); marketTimer=null; }
   if(t==='market'){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }

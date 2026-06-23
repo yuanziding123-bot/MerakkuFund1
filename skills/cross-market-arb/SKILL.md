@@ -1,6 +1,7 @@
 ---
 name: cross-market-arb
 description: Hunt for alpha in Polymarket CRYPTO markets by comparing the live exchange spot price with Polymarket's implied probability. Use when the user wants to find mispriced/lagging crypto markets (e.g. "Will BTC be above $X?") or cross-market arbitrage opportunities.
+category: Alpha
 ---
 
 # Cross-market arbitrage (crypto)

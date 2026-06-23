@@ -1,6 +1,7 @@
 ---
 name: market-research
 description: Research a Polymarket question or theme WITHOUT trading — pull the data, find similar past markets (RAG), and explain the state of a market. Use when the user wants analysis or understanding, not execution.
+category: Research
 ---
 
 # Market research

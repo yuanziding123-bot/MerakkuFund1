@@ -44,7 +44,8 @@ async def index() -> FileResponse:
 
 @app.get("/api/skills")
 async def skills() -> JSONResponse:
-    return JSONResponse([{"id": s["id"], "name": s["name"], "description": s["description"]}
+    return JSONResponse([{"id": s["id"], "name": s["name"], "description": s["description"],
+                          "category": s.get("category", "General")}
                          for s in list_skills()])
 
 

@@ -1,6 +1,7 @@
 ---
 name: polymarket-trading
 description: Trade Polymarket prediction markets by tracking smart-money flow and order-book microstructure (not by forecasting events). Use when the user wants to scan prediction markets, analyse a market, estimate a fair probability, size a position with risk control, paper-trade, or review trading P&L. Backed by the `polyagents` MCP server.
+category: Trading
 ---
 
 # Polymarket trading

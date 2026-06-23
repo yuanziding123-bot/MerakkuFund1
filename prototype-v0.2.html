@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>aihf · Financial Agent v0.2</title>
+<style>
+  /* ─── Design tokens (strictly from DESIGN.md) ─────────────────────── */
+  :root {
+    --primary: #f7f5f0;            /* off-white — the brand's only "color" */
+    --on-primary: #2b2622;
+    --ink: #f7f5f0;
+    --body: #c9c0ad;
+    --body-strong: #dad2c1;
+    --mute: #aea69c;
+    --canvas: #2b2622;             /* warm dark — the brand identity */
+    --canvas-soft: #383330;
+    --hairline: #3f3a36;
+    --hairline-soft: #34302c;
+
+    /* Semantic — DM-mono numerics only, kept restrained */
+    --pos: #a8d8b0;
+    --neg: #e7a0a0;
+    --warn: #e2c37a;
+    --info: #9fb9d6;
+
+    --shadow: rgba(18, 15, 13, .5);
+  }
+  body.light {
+    --primary: #2b2622;
+    --on-primary: #f7f5f0;
+    --ink: #2b2622;
+    --body: #5f554d;
+    --body-strong: #3a332e;
+    --mute: #847970;
+    --canvas: #f7f5f0;
+    --canvas-soft: #e9e2d4;
+    --hairline: #cfc5b6;
+    --hairline-soft: #ddd3c3;
+    --pos: #2f7d48;
+    --neg: #a64d4d;
+    --warn: #8a6816;
+    --info: #3f6688;
+    --shadow: rgba(84, 70, 58, .16);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; background: transparent; border: 0; }
+  .mono { font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* ─── App shell — 3 columns: rail / list / workspace ─────────────── */
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 232px 300px minmax(0, 1fr);
+  }
+
+  /* ─── Rail (left nav) ─────────────────────────────────────────────── */
+  .rail {
+    border-right: 1px solid var(--hairline-soft);
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 6px 16px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .mark {
+    position: relative; width: 26px; height: 26px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+  }
+  .mark:before, .mark:after { content: ""; position: absolute; background: var(--primary); }
+  .mark:before { width: 2px; top: 5px; bottom: 5px; left: 11px; }
+  .mark:after { height: 2px; left: 5px; right: 5px; top: 11px; }
+  .brand strong { display: block; font-size: 15px; font-weight: 500; line-height: 18px; }
+  .brand span { display: block; color: var(--mute); font-size: 11px; line-height: 14px; }
+
+  .mode-group { padding: 14px 0; border-bottom: 1px solid var(--hairline-soft); }
+  .label {
+    color: var(--mute); font-size: 11px; line-height: 16px;
+    margin: 0 8px 8px; text-transform: lowercase; letter-spacing: .02em;
+  }
+  .nav-item {
+    width: 100%; min-height: 34px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 9px; margin: 2px 0; text-align: left;
+    color: var(--body-strong);
+    border: 1px solid transparent; border-radius: 3px;
+  }
+  .nav-item svg { width: 16px; height: 16px; flex: 0 0 16px; }
+  .nav-item .name { flex: 1; min-width: 0; }
+  .nav-item .name b { display: block; font-weight: 500; color: inherit; font-size: 13px; line-height: 17px; }
+  .nav-item .name small { display: block; color: var(--mute); font-size: 11px; line-height: 14px; }
+  .nav-item.active { color: var(--ink); background: var(--canvas-soft); border-color: var(--hairline); }
+  .nav-item:hover:not(.active) { color: var(--ink); background: var(--hairline-soft); }
+  .nav-item .badge {
+    font-family: "DM Mono", ui-monospace, monospace;
+    font-size: 11px; color: var(--mute);
+    border: 1px solid var(--hairline); border-radius: 2px;
+    padding: 1px 5px; line-height: 14px;
+  }
+
+  .rail-foot { margin-top: auto; border-top: 1px solid var(--hairline-soft); padding-top: 12px; }
+  .mode-pill {
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 4px; padding: 9px 11px;
+    font-family: "DM Mono", ui-monospace, monospace; font-size: 11px;
+  }
+  .mode-pill .k { color: var(--mute); }
+  .mode-pill .v { color: var(--ink); }
+  .mode-pill .dot { width: 6px; height: 6px; border-radius: 99px; background: var(--pos); display: inline-block; margin-right: 5px; }
+
+  /* ─── List column (middle) ────────────────────────────────────────── */
+  .list {
+    min-width: 0; border-right: 1px solid var(--hairline-soft);
+    background: var(--canvas);
+    display: flex; flex-direction: column;
+  }
+  .list-head { padding: 18px 18px 12px; border-bottom: 1px solid var(--hairline-soft); }
+  .list-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 500; line-height: 28px; letter-spacing: -0.4px; }
+  .list-head p { margin: 0; color: var(--mute); font-size: 12px; line-height: 16px; }
+  .search {
+    margin-top: 12px;
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 3px; padding: 7px 10px;
+  }
+  .search svg { width: 14px; height: 14px; color: var(--mute); }
+  .search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
+  .list-scroll { padding: 10px 10px 18px; overflow: auto; min-height: 0; }
+
+  .obj {
+    width: 100%; text-align: left; display: block;
+    border: 1px solid transparent; border-radius: 4px;
+    padding: 11px 12px; margin-bottom: 4px; color: var(--body);
+  }
+  .obj:hover, .obj.active { background: var(--canvas-soft); border-color: var(--hairline); color: var(--ink); }
+  .obj .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .obj .top strong { color: inherit; font-weight: 500; font-size: 13px; line-height: 17px; }
+  .obj .meta { color: var(--mute); font-family: "DM Mono", ui-monospace, monospace; font-size: 11px; }
+  .obj .desc { color: var(--body); margin: 5px 0 7px; font-size: 12px; line-height: 16px; }
+  .obj .tags { display: flex; gap: 5px; flex-wrap: wrap; }
+  .tag {
+    display: inline-flex; align-items: center; min-height: 18px;
+    border: 1px solid var(--hairline); border-radius: 2px;
+    padding: 0 5px; color: var(--body); font-size: 11px; line-height: 14px; white-space: nowrap;
+  }
+  .tag.pos { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 45%, transparent); }
+  .tag.neg { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 45%, transparent); }
+  .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .tag.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
+  .tag.state-draft { color: var(--mute); }
+  .tag.state-lab { color: var(--info); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
+  .tag.state-paper { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .tag.state-live { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 45%, transparent); }
+
+  /* ─── Workspace (main) ────────────────────────────────────────────── */
+  .ws { min-width: 0; display: grid; grid-template-rows: 49px minmax(0, 1fr); }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 0 16px; border-bottom: 1px solid var(--hairline-soft);
+  }
+  .crumbs { display: flex; align-items: center; gap: 8px; color: var(--body); min-width: 0; font-size: 13px; }
+  .crumbs b { color: var(--ink); font-weight: 500; }
+  .crumbs .sep { color: var(--mute); }
+  .crumbs .live-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--pos); }
+  .tools { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 32px; height: 32px; display: grid; place-items: center;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 3px; color: var(--body-strong);
+  }
+  .icon-btn:hover { color: var(--ink); border-color: var(--body); }
+  .btn {
+    min-height: 32px; display: inline-flex; align-items: center; gap: 7px;
+    padding: 0 11px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 3px; color: var(--body-strong); font-size: 13px;
+  }
+  .btn:hover { color: var(--ink); border-color: var(--body); }
+  .btn.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+  .btn.danger { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 40%, var(--hairline)); }
+  .btn svg { width: 14px; height: 14px; }
+
+  .view { min-height: 0; overflow: auto; display: none; }
+  .view.active { display: block; }
+
+  /* ─── Ask (chat) view ─────────────────────────────────────────────── */
+  .chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+  .messages { overflow: auto; padding: 24px clamp(16px, 6vw, 48px); }
+  .msg {
+    display: grid; grid-template-columns: 28px minmax(0, 740px);
+    gap: 12px; margin-bottom: 20px; max-width: 100%;
+  }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 4px;
+    background: var(--canvas-soft); border: 1px solid var(--hairline);
+    display: grid; place-items: center; color: var(--body);
+    font-family: "DM Mono", ui-monospace, monospace; font-size: 11px;
+  }
+  .bubble { color: var(--body-strong); padding-top: 3px; }
+  .bubble p { margin: 0 0 10px; }
+  .bubble strong { color: var(--ink); font-weight: 500; }
+  .bubble .num { font-family: "DM Mono", ui-monospace, monospace; }
+  .bubble .pos { color: var(--pos); }
+  .bubble .neg { color: var(--neg); }
+  .bubble .warn { color: var(--warn); }
+
+  /* Artifact card — the "emergent object" (Claude-style) */
+  .artifact {
+    margin-top: 10px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 4px; overflow: hidden; max-width: 560px;
+  }
+  .artifact-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; border-bottom: 1px solid var(--hairline-soft);
+    background: var(--canvas);
+  }
+  .artifact-head .lhs { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .artifact-head .type {
+    font-family: "DM Mono", ui-monospace, monospace; font-size: 11px;
+    color: var(--info); border: 1px solid color-mix(in srgb, var(--info) 40%, transparent);
+    border-radius: 2px; padding: 1px 5px;
+  }
+  .artifact-head .title { color: var(--ink); font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .artifact-head .rhs { display: flex; gap: 6px; }
+  .artifact-body { padding: 11px 12px; }
+  .artifact-body .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; }
+  .artifact-body .kv dt { color: var(--mute); }
+  .artifact-body .kv dd { margin: 0; color: var(--body-strong); font-family: "DM Mono", ui-monospace, monospace; }
+  .artifact-actions { display: flex; gap: 6px; padding: 0 12px 11px; }
+  .artifact-actions .btn { min-height: 28px; padding: 0 9px; font-size: 12px; }
+
+  .tool-run {
+    margin-top: 9px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 4px; padding: 9px 11px; max-width: 560px;
+    font-family: "DM Mono", ui-monospace, monospace; font-size: 11.5px;
+    color: var(--body); line-height: 17px;
+  }
+  .tool-run .name { color: var(--pos); }
+  .tool-run .ok { color: var(--pos); }
+  .tool-run .bad { color: var(--neg); }
+
+  .composer { border-top: 1px solid var(--hairline-soft); padding: 12px clamp(16px, 6vw, 48px) 18px; background: var(--canvas); }
+  .compose-box {
+    max-width: 820px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 4px; padding: 9px 9px 9px 12px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end;
+  }
+  .compose-box textarea {
+    min-height: 40px; resize: none; border: 0; outline: 0;
+    background: transparent; color: var(--ink); font-size: 14px; line-height: 20px;
+  }
+  .compose-foot { display: flex; align-items: center; gap: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-width: 820px; }
+  .chip {
+    padding: 6px 10px; background: var(--canvas-soft); color: var(--body);
+    border: 1px solid var(--hairline); border-radius: 3px; font-size: 12px;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--body); }
+
+  /* ─── Dashboard layout (Lab / Live / Library views) ──────────────── */
+  .dash { padding: 24px clamp(16px, 4vw, 36px); }
+  .dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  h1 {
+    margin: 0 0 6px; font-size: 32px; line-height: 38px; font-weight: 400;
+    letter-spacing: -0.8px;
+  }
+  .lead { color: var(--body); font-size: 14px; max-width: 640px; margin: 0; line-height: 20px; }
+
+  .metrics {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid var(--hairline); background: var(--hairline-soft);
+    gap: 1px; border-radius: 4px; overflow: hidden; margin: 16px 0 22px;
+  }
+  .metric { background: var(--canvas-soft); padding: 13px 14px; min-width: 0; }
+  .metric .k { color: var(--mute); font-size: 11px; line-height: 15px; margin-bottom: 6px; }
+  .metric .v { font-size: 22px; line-height: 28px; font-weight: 500; letter-spacing: -0.3px; }
+  .metric .v.mono { font-family: "DM Mono", ui-monospace, monospace; font-size: 20px; }
+  .metric .s { color: var(--body); font-size: 11px; line-height: 15px; margin-top: 3px; }
+  .metric .s.pos { color: var(--pos); }
+  .metric .s.neg { color: var(--neg); }
+  .metric .s.warn { color: var(--warn); }
+
+  /* Panels */
+  .panel {
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    border-radius: 4px; padding: 16px; min-width: 0;
+  }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .panel-head h3 { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px; }
+  .panel-head .hint { color: var(--mute); font-size: 11px; }
+  .stack { display: grid; gap: 16px; }
+  .row-2 { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .8fr); gap: 16px; }
+  .row-2-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; border: 1px solid var(--hairline); background: var(--canvas-soft); border-radius: 4px; overflow: hidden; }
+  th, td { border-bottom: 1px solid var(--hairline-soft); padding: 9px 11px; text-align: left; vertical-align: top; }
+  th { color: var(--mute); font-size: 11px; font-weight: 400; background: var(--canvas); line-height: 15px; }
+  td { color: var(--body-strong); font-size: 13px; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr.active { background: var(--canvas); }
+  td.mono, th.mono { font-family: "DM Mono", ui-monospace, monospace; }
+  .cell-strong { color: var(--ink); font-weight: 500; }
+
+  /* Progress / distribution bars */
+  .bar { height: 6px; background: var(--canvas); border-radius: 2px; overflow: hidden; min-width: 70px; border: 1px solid var(--hairline-soft); }
+  .bar > span { display: block; height: 100%; background: var(--primary); }
+  .bar > span.pos { background: var(--pos); }
+  .bar > span.warn { background: var(--warn); }
+  .bar > span.neg { background: var(--neg); }
+
+  /* Terminal card */
+  .term { border: 1px solid var(--hairline); background: #211d1a; border-radius: 4px; overflow: hidden; }
+  body.light .term { background: #fffaf0; }
+  .term-bar {
+    height: 32px; display: flex; align-items: center; gap: 6px;
+    border-bottom: 1px solid var(--hairline-soft); padding: 0 11px;
+    color: var(--mute); font-family: "DM Mono", ui-monospace, monospace; font-size: 11px;
+  }
+  .lamp { width: 8px; height: 8px; border-radius: 99px; background: var(--hairline); }
+  .term-body { padding: 13px; font-family: "DM Mono", ui-monospace, monospace; font-size: 12px; line-height: 18px; color: var(--body-strong); }
+  .term-body .cmd { color: var(--ink); }
+  .term-body .ok { color: var(--pos); }
+  .term-body .dim { color: var(--mute); }
+  .term-body .bad { color: var(--neg); }
+
+  /* Promotion-gate flow diagram — the v0.2 centerpiece */
+  .gates { display: flex; align-items: stretch; gap: 0; margin: 18px 0; flex-wrap: wrap; }
+  .gate {
+    flex: 1; min-width: 200px;
+    border: 1px solid var(--hairline); background: var(--canvas-soft);
+    padding: 12px 14px; border-radius: 4px; position: relative;
+  }
+  .gate .step { color: var(--mute); font-family: "DM Mono", ui-monospace, monospace; font-size: 11px; margin-bottom: 4px; }
+  .gate .title { color: var(--ink); font-weight: 500; font-size: 13px; line-height: 18px; margin-bottom: 4px; }
+  .gate .rule { color: var(--body); font-size: 11px; line-height: 15px; }
+  .gate .rule .mono { color: var(--body-strong); }
+  .gate.current { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+  .gate.passed { border-color: color-mix(in srgb, var(--pos) 50%, var(--hairline)); }
+  .gate.passed .step:after { content: " ✓"; color: var(--pos); }
+  .gate.locked { opacity: .55; }
+  .arrow {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; color: var(--mute); font-family: "DM Mono", ui-monospace, monospace;
+  }
+
+  /* Lineage timeline */
+  .lineage { border-left: 1px solid var(--hairline); margin: 8px 0 0 8px; padding-left: 16px; }
+  .event { position: relative; padding-bottom: 14px; }
+  .event:before {
+    content: ""; position: absolute; left: -21px; top: 4px;
+    width: 8px; height: 8px; border-radius: 99px;
+    background: var(--canvas); border: 1px solid var(--primary);
+  }
+  .event.promoted:before { background: var(--pos); border-color: var(--pos); }
+  .event strong { display: block; color: var(--ink); font-weight: 500; font-size: 13px; }
+  .event span { color: var(--mute); font-size: 11px; }
+  .event .ev-meta { color: var(--body); font-size: 12px; margin-top: 2px; }
+
+  /* Calibration chart */
+  .calib {
+    height: 180px; border: 1px solid var(--hairline); border-radius: 3px;
+    background:
+      linear-gradient(to right, var(--hairline-soft) 1px, transparent 1px) 0 0 / 10% 100%,
+      linear-gradient(to top, var(--hairline-soft) 1px, transparent 1px) 0 0 / 100% 10%,
+      var(--canvas-soft);
+    position: relative; margin: 10px 0;
+  }
+  .diag {
+    position: absolute; left: 8%; bottom: 8%;
+    width: 84%; height: 1px; background: var(--mute); opacity: .5;
+    transform: rotate(-45deg); transform-origin: left center;
+  }
+  .bin { position: absolute; width: 7px; height: 7px; border-radius: 99px; background: var(--primary); border: 1px solid var(--on-primary); }
+
+  /* Segmented control */
+  .seg { display: inline-flex; border: 1px solid var(--hairline); background: var(--canvas-soft); border-radius: 3px; padding: 2px; }
+  .seg button { padding: 5px 10px; color: var(--body); border-radius: 2px; font-size: 12px; }
+  .seg button.active { color: var(--on-primary); background: var(--primary); }
+
+  /* Detail columns */
+  .kv-list { display: grid; grid-template-columns: 1fr auto; gap: 7px 14px; }
+  .kv-list dt { color: var(--mute); font-size: 12px; }
+  .kv-list dd { margin: 0; color: var(--body-strong); font-family: "DM Mono", ui-monospace, monospace; font-size: 12px; }
+
+  /* Risk gauge */
+  .gauge { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--hairline-soft); }
+  .gauge:last-child { border-bottom: 0; }
+  .gauge .k { color: var(--mute); font-size: 12px; }
+  .gauge .v { font-family: "DM Mono", ui-monospace, monospace; font-size: 12px; color: var(--body-strong); }
+  .gauge .v.pos { color: var(--pos); } .gauge .v.warn { color: var(--warn); } .gauge .v.neg { color: var(--neg); }
+
+  /* Toast */
+  .toast {
+    position: fixed; right: 18px; bottom: 18px; z-index: 10;
+    border: 1px solid var(--hairline); background: var(--canvas-soft); color: var(--ink);
+    border-radius: 4px; padding: 10px 13px; box-shadow: 0 14px 38px var(--shadow);
+    transform: translateY(12px); opacity: 0; pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease; max-width: min(420px, calc(100vw - 36px));
+    font-size: 13px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* Empty / placeholder note */
+  .note {
+    border: 1px dashed var(--hairline); background: transparent;
+    border-radius: 4px; padding: 18px 20px; color: var(--mute); font-size: 13px; line-height: 19px;
+  }
+  .note b { color: var(--body-strong); font-weight: 500; }
+
+  /* Responsive */
+  @media (max-width: 1180px) {
+    .app { grid-template-columns: 64px 264px minmax(0, 1fr); }
+    .brand .txt, .nav-item .name, .label, .mode-pill .k { display: none; }
+    .brand { justify-content: center; padding-left: 0; padding-right: 0; }
+    .nav-item { justify-content: center; padding: 9px 0; }
+    .nav-item .badge { display: none; }
+    .row-2, .row-2-eq { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 820px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; grid-template-columns: 1fr; }
+    .rail, .list { border-right: 0; border-bottom: 1px solid var(--hairline-soft); }
+    .rail { position: sticky; top: 0; z-index: 2; background: var(--canvas); flex-direction: row; align-items: center; padding: 8px; overflow-x: auto; }
+    .mode-group { display: flex; gap: 4px; padding: 0; border: 0; }
+    .rail-foot { display: none; }
+    .metrics { grid-template-columns: 1fr 1fr; }
+    .gates { flex-direction: column; } .arrow { transform: rotate(90deg); width: auto; height: 20px; }
+    h1 { font-size: 26px; line-height: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ════════════════════════════════════════════════════════════════════
+       LEFT RAIL — the only nav. 3 modes (Claude-style) + library.
+       Mode determines side-effect scope, not UI chrome.
+  ════════════════════════════════════════════════════════════════════ -->
+  <aside class="rail" aria-label="主导航">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div class="txt">
+        <strong>aihf</strong>
+        <span>v0.2 · financial agent</span>
+      </div>
+    </div>
+
+    <div class="mode-group">
+      <p class="label">modes · side-effect scope</p>
+      <!-- ASK — read-only -->
+      <button class="nav-item active" data-view="ask" title="Ask · 只读">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+        <div class="name"><b>Ask</b><small>read-only · scan / explain</small></div>
+      </button>
+      <!-- LAB — sandbox, can create objects -->
+      <button class="nav-item" data-view="lab" title="Lab · 沙盒">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6M10 3v6.5L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/></svg>
+        <div class="name"><b>Lab</b><small>sandbox · hypo / backtest</small></div>
+        <span class="badge">6</span>
+      </button>
+      <!-- LIVE — real money, locked down (disabled in MVP) -->
+      <button class="nav-item" data-view="live" title="Live · 实盘">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v20M5 9l7-7 7 7M5 15l7 7 7-7"/></svg>
+        <div class="name"><b>Live</b><small>real money · gated</small></div>
+        <span class="badge">off</span>
+      </button>
+    </div>
+
+    <div class="mode-group">
+      <p class="label">library</p>
+      <button class="nav-item" data-view="library" title="Library · 对象库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5z"/><path d="M8 7h6M8 11h8"/></svg>
+        <div class="name"><b>Objects</b><small>hypo / strat / positions</small></div>
+        <span class="badge">23</span>
+      </button>
+      <button class="nav-item" data-view="markets" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-7"/></svg>
+        <div class="name"><b>Markets</b><small>polymarket · 38 tracked</small></div>
+      </button>
+      <button class="nav-item" data-view="eval" title="Evaluation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h18"/><path d="M12 3v18"/><circle cx="12" cy="12" r="8"/></svg>
+        <div class="name"><b>Evaluation</b><small>brier · ece · baseline</small></div>
+      </button>
+    </div>
+
+    <div class="rail-foot">
+      <div class="mode-pill">
+        <span><span class="dot"></span><span class="k">engine</span></span>
+        <span class="v">LangGraph + claude</span>
+      </div>
+      <div class="mode-pill" style="margin-top:8px">
+        <span><span class="k">live trading</span></span>
+        <span class="v neg">disabled</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       MIDDLE LIST — context-sensitive object list
+  ════════════════════════════════════════════════════════════════════ -->
+  <aside class="list">
+    <div class="list-head">
+      <h2 id="listTitle">Ask</h2>
+      <p id="listSub">read-only · agent explains, never trades</p>
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" placeholder="search objects, markets, runs..." />
+      </label>
+    </div>
+    <div class="list-scroll" id="listScroll"></div>
+  </aside>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       MAIN WORKSPACE
+  ════════════════════════════════════════════════════════════════════ -->
+  <main class="ws">
+    <header class="topbar">
+      <div class="crumbs">
+        <span class="live-dot"></span>
+        <b id="crumbMode">Ask</b>
+        <span class="sep">/</span>
+        <span id="crumbView">conversation</span>
+        <span class="sep">·</span>
+        <span class="mono" style="color:var(--mute);font-size:11px" id="crumbMeta">session sess_ask_0622 · mode: read-only</span>
+      </div>
+      <div class="tools">
+        <button class="icon-btn" id="themeBtn" title="切换主题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+        <button class="icon-btn" id="refreshBtn" title="刷新">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v6h-6"/></svg>
+        </button>
+        <button class="btn" id="snapshotBtn" title="创建 point-in-time 快照">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16v13H4z"/><path d="M8 3h8l2 4H6z"/></svg>
+          Snapshot
+        </button>
+        <button class="btn primary" id="runBtn" title="运行扫描">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3v18l15-9z"/></svg>
+          Run scan
+        </button>
+      </div>
+    </header>
+
+    <!-- ─────────────────────── ASK VIEW (chat) ─────────────────────── -->
+    <section class="view active" id="view-ask">
+      <div class="chat">
+        <div class="messages" id="messages">
+          <div class="msg">
+            <div class="avatar">ai</div>
+            <div class="bubble">
+              <p><strong>Ready.</strong> 我在 <span class="num">Ask</span> 模式下工作——只读、可解释、不下注。所有数据都是 point-in-time 锁定的。有想法想验证时，我可以把它提升为 Lab 里的 Hypothesis。</p>
+              <div class="tool-run"><span class="name">session.check</span> { mode: <span class="ok">"ask"</span>, live: false, pit_enforced: true, tools: 8 }</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="avatar">you</div>
+            <div class="bubble"><p>最近政治类市场，我们的 p_cal 表现怎么样？</p></div>
+          </div>
+
+          <div class="msg">
+            <div class="avatar">ai</div>
+            <div class="bubble">
+              <p>过去 30 天 <span class="num">politics</span> 类已结算 <span class="num">42</span> 个，结果如下（对比 market-implied baseline）：</p>
+              <p>• model Brier <span class="num">0.142</span> &nbsp;vs&nbsp; market <span class="num">0.161</span> &nbsp;→&nbsp; <span class="pos">skill +11.8%</span>（bootstrap 95% CI <span class="num">[+3.2%, +19.4%]</span>）<br>
+                 • ECE <span class="num">0.033</span>（阈值 0.04，<span class="pos">达标</span>）<br>
+                 • 但 <span class="num">crypto</span> 类 n=18 不显著，方向略正向。</p>
+              <div class="tool-run"><span class="name">evaluate_forecast</span> { slice: "category:politics", window: "30d", baseline: "market" }</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="avatar">you</div>
+            <div class="bubble"><p>我觉得 crypto 在新闻事件后 LLM 更新比市场快，能验证吗？</p></div>
+          </div>
+
+          <div class="msg">
+            <div class="avatar">ai</div>
+            <div class="bubble">
+              <p>这是个值得验证的假设。我把它起草成一个 <strong>Hypothesis</strong>——它会出现在 Lab 里，带版本号、 PIT 快照、并能在历史数据上回测。<strong>我不会自动下单</strong>，也不会把它注入未来的 prompt——它先要过评估门。</p>
+              <!-- EMERGENT ARTIFACT — the Claude-style "object floats up" -->
+              <div class="artifact">
+                <div class="artifact-head">
+                  <div class="lhs">
+                    <span class="type">HYPOTHESIS</span>
+                    <span class="title">crypto · news event freshness</span>
+                  </div>
+                  <div class="rhs">
+                    <span class="tag state-draft">draft</span>
+                  </div>
+                </div>
+                <div class="artifact-body">
+                  <dl class="kv-list">
+                    <dt>id</dt><dd>H-006</dd>
+                    <dt>snapshot</dt><dd>snap_a18f3c · PIT locked</dd>
+                    <dt>category</dt><dd>crypto</dd>
+                    <dt>features</dt><dd>news_event, orderbook_pressure, rag_similar</dd>
+                    <dt>baseline</dt><dd>market_price · no_news_llm</dd>
+                    <dt>success</dt><dd>brier_delta &lt; -0.01 · ece &lt; 0.04 · n ≥ 30</dd>
+                  </dl>
+                </div>
+                <div class="artifact-actions">
+                  <button class="btn primary" data-toast="H-006 已提升到 Lab · 状态 lab">Promote to Lab</button>
+                  <button class="btn" data-toast="已展开假设详情编辑面板">Edit</button>
+                  <button class="btn" data-toast="假设已归档为草稿">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="compose-box">
+            <textarea id="prompt" placeholder="Ask about markets, propose a hypothesis, or request an evaluation..."></textarea>
+            <div class="compose-foot">
+              <button class="icon-btn" title="引用对象">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 7h6M9 12h6M9 17h4"/><path d="M5 4h14v16H5z"/></svg>
+              </button>
+              <button class="btn primary" id="sendBtn">Send</button>
+            </div>
+          </div>
+          <div class="chips">
+            <button class="chip">跑 90 天 crypto 回测</button>
+            <button class="chip">解释 Fed 市场的校准曲线</button>
+            <button class="chip">对比 H-003 vs H-006</button>
+            <button class="chip">把 H-006 提升到 paper</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── LAB VIEW ─────────────────────── -->
+    <section class="view" id="view-lab">
+      <div class="dash">
+        <div class="dash-head">
+          <div>
+            <h1>Lab</h1>
+            <p class="lead">沙盒里可以造对象、跑回测、训校准器。没有真钱，但所有 PIT 纪律照旧。对象要进入 Live 必须先过两道评估门。</p>
+          </div>
+          <button class="btn primary" data-toast="已打开新建 Hypothesis 面板">+ New hypothesis</button>
+        </div>
+
+        <!-- The 3 promotion gates — v0.2's core mechanic, surfaced explicitly -->
+        <div class="panel" style="margin-bottom:18px">
+          <div class="panel-head">
+            <h3>Promotion gates · 对象状态机</h3>
+            <span class="hint">每道门是确定性规则，不是 LLM 判断</span>
+          </div>
+          <div class="gates">
+            <div class="gate passed">
+              <div class="step">gate 1 · Ask → Hypothesis</div>
+              <div class="title">用户显式点击</div>
+              <div class="rule">人工门 · 草稿进 Lab</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gate current">
+              <div class="step">gate 2 · Hypothesis → paper</div>
+              <div class="title">评估门</div>
+              <div class="rule"><span class="mono">forward_n ≥ 30</span> · <span class="mono">brier CI 下界 &gt; 0</span> · <span class="mono">ece &lt; 0.04</span></div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gate locked">
+              <div class="step">gate 3 · paper → Live</div>
+              <div class="title">风控门 + 人工</div>
+              <div class="rule"><span class="mono">apy &gt; min</span> · <span class="mono">max_dd &lt; lim</span> · <span class="mono">manual approve</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="k">active hypotheses</div>
+            <div class="v">6</div>
+            <div class="s">2 in forward-test</div>
+          </div>
+          <div class="metric">
+            <div class="k">best slice</div>
+            <div class="v">politics</div>
+            <div class="s pos">stable edge · CI +[3.2%, 19.4%]</div>
+          </div>
+          <div class="metric">
+            <div class="k">weak slice</div>
+            <div class="v">sports</div>
+            <div class="s neg">market wins · kill at M2</div>
+          </div>
+          <div class="metric">
+            <div class="k">calibrator</div>
+            <div class="v mono">isotonic v3</div>
+            <div class="s">holdout ece 0.031</div>
+          </div>
+        </div>
+
+        <div class="row-2" style="margin-bottom:18px">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Selected hypothesis · H-006</h3>
+              <span class="tag state-lab">lab</span>
+            </div>
+            <p style="margin:0 0 12px;color:var(--body);font-size:13px">"crypto 类新闻事件后，LLM 概率更新速度快于市场价格。"</p>
+
+            <dl class="kv-list">
+              <dt>version</dt><dd>3</dd>
+              <dt>snapshot_id</dt><dd>snap_a18f3c</dd>
+              <dt>lineage</dt><dd>drafted in sess_ask_0622 → promoted to Lab</dd>
+              <dt>feature_set</dt><dd>news_event, orderbook_pressure, rag_similar</dd>
+              <dt>prompt_version</dt><dd>polymarket-trading v0.7.2</dd>
+              <dt>model_version</dt><dd>claude-sonnet-4.5</dd>
+            </dl>
+
+            <h3 style="margin:16px 0 8px;font-size:13px">Latest backtest · 90d replay</h3>
+            <div class="term">
+              <div class="term-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>run_backtest · PIT enforced</span></div>
+              <div class="term-body">
+                <span class="cmd">$ run_backtest --hypothesis H-006 --window 90d --slice crypto</span><br>
+                settled: <span class="ok">28</span> · pending: 14<br>
+                brier_model: <span class="ok">0.154</span> · brier_market: 0.191<br>
+                brier_delta: <span class="ok">-0.037</span> · bootstrap CI [-0.061, -0.013]<br>
+                ece_model: <span class="ok">0.038</span><br>
+                leak_checks: <span class="ok">PASS</span> (8 invariants tested)<br>
+                verdict: <span class="ok">EDGE_OBSERVED</span> · n=28 (below gate-2 threshold of 30)
+              </div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+              <button class="btn primary" data-toast="H-006 进入 forward-test · 待样本积累到 n≥30 过评估门">Run forward-test</button>
+              <button class="btn" data-toast="已打开评估报告">View report</button>
+              <button class="btn" data-toast="已 fork 为 H-006-v4">Fork</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Calibration curve</h3><span class="tag pos">p_cal beats raw</span></div>
+            <div class="calib">
+              <div class="diag"></div>
+              <span class="bin" style="left:14%;bottom:16%"></span>
+              <span class="bin" style="left:26%;bottom:27%"></span>
+              <span class="bin" style="left:38%;bottom:40%"></span>
+              <span class="bin" style="left:52%;bottom:52%"></span>
+              <span class="bin" style="left:66%;bottom:68%"></span>
+              <span class="bin" style="left:80%;bottom:79%"></span>
+            </div>
+            <p style="margin:0;color:var(--mute);font-size:11px;line-height:15px">原始 p_raw 在 70-90% 分桶过度自信；isotonic v3 后 ECE 从 0.081 降到 0.031。</p>
+
+            <h3 style="margin:16px 0 8px;font-size:13px">Lineage</h3>
+            <div class="lineage">
+              <div class="event promoted">
+                <strong>Drafted in Ask</strong>
+                <span>sess_ask_0622 · 2026-06-21</span>
+                <div class="ev-meta">user proposed "crypto news freshness"</div>
+              </div>
+              <div class="event promoted">
+                <strong>Promoted to Lab</strong>
+                <span>gate 1 · user click · 2026-06-21</span>
+                <div class="ev-meta">evidence: session transcript</div>
+              </div>
+              <div class="event">
+                <strong>Backtest v3 run</strong>
+                <span>2026-06-22 · n=28</span>
+                <div class="ev-meta">brier_delta -0.037 · CI excludes 0</div>
+              </div>
+              <div class="event">
+                <strong>Gate 2 — pending</strong>
+                <span>waiting for forward-test n ≥ 30</span>
+                <div class="ev-meta">currently 28/30</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Hypotheses · all</h3>
+            <div class="seg">
+              <button class="active">All</button>
+              <button>Forward</button>
+              <button>Draft</button>
+              <button>Archived</button>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Statement</th><th>Slice</th><th>State</th>
+                <th>Brier Δ</th><th>ECE</th><th>n</th><th>Next</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="active">
+                <td class="mono">H-006</td>
+                <td><div class="cell-strong">crypto · news event freshness</div></td>
+                <td>crypto · 7-30d</td>
+                <td><span class="tag state-lab">lab</span></td>
+                <td class="mono pos">-0.037</td>
+                <td class="mono">0.038</td>
+                <td class="mono">28</td>
+                <td>accumulate n</td>
+              </tr>
+              <tr>
+                <td class="mono">H-003</td>
+                <td><div class="cell-strong">politics · event freshness</div></td>
+                <td>politics · 7-45d</td>
+                <td><span class="tag state-paper">paper</span></td>
+                <td class="mono pos">-0.021</td>
+                <td class="mono">0.032</td>
+                <td class="mono">72</td>
+                <td>forward-test</td>
+              </tr>
+              <tr>
+                <td class="mono">H-004</td>
+                <td><div class="cell-strong">macro · orderbook pressure</div></td>
+                <td>macro · 14-90d</td>
+                <td><span class="tag state-lab">lab</span></td>
+                <td class="mono pos">-0.008</td>
+                <td class="mono">0.049</td>
+                <td class="mono">34</td>
+                <td>improve prompt</td>
+              </tr>
+              <tr>
+                <td class="mono">H-005</td>
+                <td><div class="cell-strong">sports · injury news</div></td>
+                <td>sports · 1-7d</td>
+                <td><span class="tag">archived</span></td>
+                <td class="mono neg">+0.004</td>
+                <td class="mono">0.077</td>
+                <td class="mono">41</td>
+                <td>killed at gate 2</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── LIVE VIEW ─────────────────────── -->
+    <section class="view" id="view-live">
+      <div class="dash">
+        <div class="dash-head">
+          <div>
+            <h1>Live</h1>
+            <p class="lead">实盘默认关闭。加 Live 不重构核心——只是挂一个 <span class="mono">LiveCLOBExecutionAdapter</span> 并收紧权限。每个 action 必须命中已批准的 Strategy 并过风控门。</p>
+          </div>
+          <button class="btn danger" data-toast="Live 仍被策略门锁定 · 无法开启">Enable live (locked)</button>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="k">live trading</div>
+            <div class="v neg">disabled</div>
+            <div class="s neg">policy locked · needs gate-3 pass</div>
+          </div>
+          <div class="metric">
+            <div class="k">strategies eligible</div>
+            <div class="v">1</div>
+            <div class="s">S-002 passed all 3 gates</div>
+          </div>
+          <div class="metric">
+            <div class="k">paper APY (30d)</div>
+            <div class="v mono pos">+18.4%</div>
+            <div class="s pos">after slippage + capital lock</div>
+          </div>
+          <div class="metric">
+            <div class="k">max drawdown</div>
+            <div class="v mono warn">-3.8%</div>
+            <div class="s">limit -8%</div>
+          </div>
+        </div>
+
+        <div class="row-2">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Gate 3 · paper → Live (风控门)</h3>
+              <span class="hint">候选 S-002 · politics event freshness</span>
+            </div>
+            <div class="gauge"><span class="k">paper_apy &gt; min_apy (12%)</span><span class="v pos">18.4% ✓</span></div>
+            <div class="gauge"><span class="k">max_drawdown &lt; limit (-8%)</span><span class="v pos">-3.8% ✓</span></div>
+            <div class="gauge"><span class="k">paper n &gt;= 60</span><span class="v pos">72 ✓</span></div>
+            <div class="gauge"><span class="k">slippage model conservative</span><span class="v pos">walk-book ✓</span></div>
+            <div class="gauge"><span class="k">brier CI lower bound &gt; 0</span><span class="v pos">+0.041 ✓</span></div>
+            <div class="gauge"><span class="k">manual approval</span><span class="v warn">pending</span></div>
+            <div class="gauge"><span class="k">audit chain complete</span><span class="v pos">yes ✓</span></div>
+
+            <div style="margin-top:14px" class="note">
+              <b>Live 不会被自动开启。</b> 所有自动检查通过后，仍需你显式点击下方按钮，并输入确认词。一旦开启，agent 的角色从"研究员"切换为"值班员"——只能执行已批准策略，不能新建假设。
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+              <button class="btn danger" data-toast="需要人工二次确认 · 请在 Settings 输入确认词">Approve for live</button>
+              <button class="btn" data-toast="S-002 维持 paper 状态">Keep paper</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>What changes when Live opens</h3></div>
+            <table>
+              <thead><tr><th>Concern</th><th>Paper (now)</th><th>Live (after)</th></tr></thead>
+              <tbody>
+                <tr><td>ExecutionAdapter</td><td class="mono">PaperExecutor</td><td class="mono">LiveCLOB</td></tr>
+                <tr><td>agent tools</td><td>+ create/edit</td><td class="neg">get/submit/halt only</td></tr>
+                <tr><td>LLM freedom</td><td>medium</td><td class="neg">low · executor role</td></tr>
+                <tr><td>new hypotheses</td><td>allowed</td><td class="neg">blocked</td></tr>
+                <tr><td>audit</td><td>session-level</td><td class="pos">action + legal</td></tr>
+                <tr><td>circuit breaker</td><td>advisory</td><td class="pos">hard kill</td></tr>
+              </tbody>
+            </table>
+
+            <h3 style="margin:16px 0 8px;font-size:13px">Core schema — unchanged</h3>
+            <div class="term">
+              <div class="term-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>architecture invariant</span></div>
+              <div class="term-body">
+                <span class="dim"># adding Live = adding an adapter, not refactoring</span><br>
+                ExecutionClient (port)<br>
+                &nbsp;├─ PaperExecutor &nbsp;&nbsp;&nbsp;&nbsp;<span class="ok">(current)</span><br>
+                &nbsp;└─ LiveCLOBExecutor &nbsp;&nbsp;<span class="bad">(gated, disabled)</span><br>
+                <span class="dim"># objects, state machine, eval ledger — unchanged</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── LIBRARY / OBJECTS VIEW ─────────────────────── -->
+    <section class="view" id="view-library">
+      <div class="dash">
+        <div class="dash-head">
+          <div>
+            <h1>Objects</h1>
+            <p class="lead">系统全部复杂度压在 5 个对象类型上。所有 UI、所有 agent 行为都是对它们的 CRUD + 状态流转。每个对象带 version、snapshot_id、lineage。</p>
+          </div>
+          <div class="seg">
+            <button class="active">All</button>
+            <button>Market</button>
+            <button>Hypothesis</button>
+            <button>Strategy</button>
+            <button>Position</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="k">Markets</div><div class="v mono">38</div><div class="s">4 categories</div></div>
+          <div class="metric"><div class="k">Hypotheses</div><div class="v mono">6</div><div class="s">2 lab · 1 paper · 3 archived</div></div>
+          <div class="metric"><div class="k">Strategies</div><div class="v mono">2</div><div class="s">1 paper · 0 live</div></div>
+          <div class="metric"><div class="k">Positions</div><div class="v mono">3</div><div class="s">paper only</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Object graph · lineage</h3><span class="hint">每个 promote 都带 evidence</span></div>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Type</th><th>Title</th><th>State</th><th>v</th><th>Lineage</th><th>Eval</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">M-119</td>
+                <td><span class="tag info">market</span></td>
+                <td><div class="cell-strong">Fed cut by September</div></td>
+                <td><span class="tag">—</span></td>
+                <td class="mono">12</td>
+                <td class="mono" style="color:var(--mute)">polymarket · macro</td>
+                <td class="mono">—</td>
+              </tr>
+              <tr>
+                <td class="mono">H-003</td>
+                <td><span class="tag info">hypothesis</span></td>
+                <td><div class="cell-strong">politics event freshness</div></td>
+                <td><span class="tag state-paper">paper</span></td>
+                <td class="mono">5</td>
+                <td class="mono">→ S-002</td>
+                <td class="mono pos">-0.021</td>
+              </tr>
+              <tr>
+                <td class="mono">S-002</td>
+                <td><span class="tag warn">strategy</span></td>
+                <td><div class="cell-strong">politics · ¼-kelly · shrinkage v3</div></td>
+                <td><span class="tag state-paper">paper</span></td>
+                <td class="mono">2</td>
+                <td class="mono">H-003 → paper</td>
+                <td class="mono pos">+18.4% apy</td>
+              </tr>
+              <tr>
+                <td class="mono">P-014</td>
+                <td><span class="tag pos">position</span></td>
+                <td><div class="cell-strong">Fed cut · YES · 350 units</div></td>
+                <td><span class="tag state-paper">paper</span></td>
+                <td class="mono">1</td>
+                <td class="mono">S-002 → paper</td>
+                <td class="mono pos">+8.0% edge</td>
+              </tr>
+              <tr>
+                <td class="mono">H-006</td>
+                <td><span class="tag info">hypothesis</span></td>
+                <td><div class="cell-strong">crypto news freshness</div></td>
+                <td><span class="tag state-lab">lab</span></td>
+                <td class="mono">3</td>
+                <td class="mono">ask → lab</td>
+                <td class="mono pos">-0.037</td>
+              </tr>
+              <tr>
+                <td class="mono">H-005</td>
+                <td><span class="tag info">hypothesis</span></td>
+                <td><div class="cell-strong">sports injury news</div></td>
+                <td><span class="tag">archived</span></td>
+                <td class="mono">2</td>
+                <td class="mono">killed at gate 2</td>
+                <td class="mono neg">+0.004</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="row-2-eq" style="margin-top:18px">
+          <div class="panel">
+            <div class="panel-head"><h3>State machine</h3></div>
+            <div class="term">
+              <div class="term-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>object states</span></div>
+              <div class="term-body">
+                <span class="cmd">draft</span> ──gate1──► <span class="cmd">lab</span> ──gate2──► <span class="cmd">paper</span> ──gate3──► <span class="ok">live</span><br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└──► <span class="bad">archived</span> (kill / decay)
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Why this makes the system general</h3></div>
+            <p style="margin:0;color:var(--body);font-size:13px;line-height:19px">
+              新市场类型 = 新 <span class="mono">MarketFetcher</span> 适配器。<br>
+              政治、加密、体育、Kalshi、PredictIt —— 都是 <span class="mono">Market</span> 对象，差异藏在 <span class="mono">metadata.tags</span>，评估按 tag 分层。<br><br>
+              新 alpha = 新 <span class="mono">Hypothesis</span>，不是新代码。<br>
+              研究者和 agent 用同一套原语表达策略。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── MARKETS VIEW ─────────────────────── -->
+    <section class="view" id="view-markets">
+      <div class="dash">
+        <div class="dash-head">
+          <div>
+            <h1>Markets</h1>
+            <p class="lead">所有市场都是同一个 <span class="mono">Market</span> 对象。差异通过 category/tag 分层评估。新市场源只需实现 <span class="mono">MarketFetcher</span> 接口。</p>
+          </div>
+          <div class="seg">
+            <button class="active">Polymarket</button>
+            <button>Kalshi</button>
+            <button class="info" style="opacity:.6">+ add source</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="k">tracked</div><div class="v mono">38</div><div class="s">12 PIT-clean</div></div>
+          <div class="metric"><div class="k">beating market</div><div class="v pos">7</div><div class="s">brier delta &lt; -0.01</div></div>
+          <div class="metric"><div class="k">paper-eligible</div><div class="v">3</div><div class="s">walk-book fill &gt; 80%</div></div>
+          <div class="metric"><div class="k">avg ECE</div><div class="v mono warn">0.041</div><div class="s">politics better than macro</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Scanner</h3><span class="hint">sorted by APY-adjusted edge</span></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Market</th><th>Category</th><th>p_market</th><th>p_cal</th>
+                <th>Edge</th><th>APY gate</th><th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="active">
+                <td><div class="cell-strong">Will the Fed cut rates by September?</div><span class="mono" style="color:var(--mute);font-size:11px">resolves 78d · snap #a18f</span></td>
+                <td><span class="tag info">macro</span></td>
+                <td class="mono">0.41</td>
+                <td class="mono">0.49</td>
+                <td class="mono pos">+8.0%</td>
+                <td><span class="tag pos">pass</span></td>
+                <td><span class="tag state-paper">paper</span></td>
+              </tr>
+              <tr>
+                <td><div class="cell-strong">Republicans control Senate after 2026?</div><span class="mono" style="color:var(--mute);font-size:11px">resolves 503d · snap #c920</span></td>
+                <td><span class="tag info">politics</span></td>
+                <td class="mono">0.55</td>
+                <td class="mono">0.59</td>
+                <td class="mono pos">+4.0%</td>
+                <td><span class="tag warn">capital lock</span></td>
+                <td><span class="tag state-draft">watch</span></td>
+              </tr>
+              <tr>
+                <td><div class="cell-strong">US CPI YoY below 3.0% next print?</div><span class="mono" style="color:var(--mute);font-size:11px">resolves 24d · snap #d451</span></td>
+                <td><span class="tag info">economy</span></td>
+                <td class="mono">0.62</td>
+                <td class="mono">0.60</td>
+                <td class="mono neg">-2.0%</td>
+                <td><span class="tag neg">fail</span></td>
+                <td><span class="tag">counterfactual</span></td>
+              </tr>
+              <tr>
+                <td><div class="cell-strong">BTC above $120k by July?</div><span class="mono" style="color:var(--mute);font-size:11px">resolves 9d · snap #e0f2</span></td>
+                <td><span class="tag info">crypto</span></td>
+                <td class="mono">0.18</td>
+                <td class="mono">0.16</td>
+                <td class="mono neg">-2.0%</td>
+                <td><span class="tag warn">thin book</span></td>
+                <td><span class="tag">counterfactual</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── EVALUATION VIEW ─────────────────────── -->
+    <section class="view" id="view-eval">
+      <div class="dash">
+        <div class="dash-head">
+          <div>
+            <h1>Evaluation</h1>
+            <p class="lead">与 L1-L4 平级的一等子系统。每条 forecast 都和 market baseline 同时结算，按类别/时间窗/版本分层。所有 delta 带 bootstrap CI。</p>
+          </div>
+          <button class="btn" data-toast="已导出 evaluations.jsonl">Export JSONL</button>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="k">Brier vs market</div><div class="v mono pos">-0.014</div><div class="s pos">CI [-0.022, -0.006]</div></div>
+          <div class="metric"><div class="k">settled</div><div class="v mono">164</div><div class="s">42 pending</div></div>
+          <div class="metric"><div class="k">ECE</div><div class="v mono">0.037</div><div class="s">10 bins</div></div>
+          <div class="metric"><div class="k">leak checks</div><div class="v pos">clean</div><div class="s">8 invariants · CI</div></div>
+        </div>
+
+        <div class="row-2-eq">
+          <div class="panel">
+            <div class="panel-head"><h3>Calibration curve</h3><span class="tag pos">p_cal beats raw</span></div>
+            <div class="calib">
+              <div class="diag"></div>
+              <span class="bin" style="left:14%;bottom:16%"></span>
+              <span class="bin" style="left:26%;bottom:27%"></span>
+              <span class="bin" style="left:38%;bottom:40%"></span>
+              <span class="bin" style="left:52%;bottom:52%"></span>
+              <span class="bin" style="left:66%;bottom:68%"></span>
+              <span class="bin" style="left:80%;bottom:79%"></span>
+            </div>
+            <p style="margin:0;color:var(--mute);font-size:11px">原始 LLM p_raw 在 70-90% 过度自信；isotonic v3 后 ECE 0.081 → 0.037。</p>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Category split</h3></div>
+            <div class="gauge"><span class="k">Politics · n=72</span><span class="v pos">Brier -0.021 · CI ✓</span></div>
+            <div class="gauge"><span class="k">Macro · n=48</span><span class="v pos">Brier -0.008</span></div>
+            <div class="gauge"><span class="k">Sports · n=41</span><span class="v neg">Brier +0.004 · killed</span></div>
+            <div class="gauge"><span class="k">Crypto · n=18</span><span class="v warn">insufficient n</span></div>
+            <div class="gauge"><span class="k">Best horizon</span><span class="v">7-45d</span></div>
+            <div class="gauge"><span class="k">Leak invariants</span><span class="v pos">8/8 pass</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ───────── List column data (context-sensitive per mode) ───────── */
+const listData = {
+  ask: {
+    title: "Ask",
+    sub: "read-only · agent explains, never trades",
+    items: [
+      { t: "Today", m: "2 conversations", d: "Crypto news freshness hypothesis", tags: ["draft"] },
+      { t: "Yesterday", m: "5 tool calls", d: "Politics 30d evaluation walkthrough", tags: ["pos"] },
+      { t: "This week", m: "12 objects surfaced", d: "Scanner comparison across categories", tags: ["info"] },
+    ]
+  },
+  lab: {
+    title: "Lab",
+    sub: "sandbox · hypo / backtest / calibrator",
+    items: [
+      { t: "H-006 · crypto freshness", m: "v3 · lab", d: "brier -0.037 · CI excludes 0 · n=28", tags: ["state-lab"] },
+      { t: "H-003 · politics freshness", m: "v5 · paper", d: "forward-test running · n=72", tags: ["state-paper"] },
+      { t: "H-004 · macro pressure", m: "v2 · lab", d: "weak edge · needs better prompt", tags: ["state-lab"] },
+      { t: "H-005 · sports injury", m: "archived", d: "killed at gate 2 · market wins", tags: [] },
+      { t: "calibrator v3", m: "isotonic · 90d", d: "holdout ece 0.031 · registry pinned", tags: ["info"] },
+    ]
+  },
+  live: {
+    title: "Live",
+    sub: "real money · disabled by policy",
+    items: [
+      { t: "S-002 · politics ¼-kelly", m: "gate 3 pending", d: "all auto-checks pass · awaiting manual approve", tags: ["warn"] },
+      { t: "Circuit breaker", m: "armed", d: "daily loss -2% · exposure 19% · limit 35%", tags: ["info"] },
+      { t: "Audit chain", m: "34ms lag", d: "session → tool → action all recorded", tags: ["pos"] },
+    ]
+  },
+  library: {
+    title: "Objects",
+    sub: "5 types · all with version + lineage",
+    items: [
+      { t: "Markets · 38", m: "4 categories", d: "polymarket source · PIT-locked snapshots", tags: ["info"] },
+      { t: "Hypotheses · 6", m: "2 lab · 1 paper", d: "each with snapshot_id + lineage", tags: [] },
+      { t: "Strategies · 2", m: "1 paper · 0 live", d: "promoted from hypotheses via gates", tags: ["warn"] },
+      { t: "Positions · 3", m: "paper only", d: "Fed YES · EU AI NO · BTC YES", tags: ["pos"] },
+    ]
+  },
+  markets: {
+    title: "Markets",
+    sub: "polymarket · 38 tracked",
+    items: [
+      { t: "Fed cut by Sep", m: "macro · 78d", d: "p_cal 0.49 vs mkt 0.41 · +8% edge", tags: ["pos", "state-paper"] },
+      { t: "Senate control 2026", m: "politics · 503d", d: "capital lock horizon · watch", tags: ["warn"] },
+      { t: "CPI under 3%", m: "economy · 24d", d: "p_cal below market · counterfactual", tags: ["neg"] },
+      { t: "BTC above 120k", m: "crypto · 9d", d: "thin book · counterfactual", tags: ["neg"] },
+    ]
+  },
+  eval: {
+    title: "Evaluation",
+    sub: "Brier · log loss · ECE · baseline",
+    items: [
+      { t: "Overall · 30d", m: "n=164", d: "brier -0.014 vs market · CI ✓", tags: ["pos"] },
+      { t: "Politics slice", m: "n=72", d: "stable edge · best slice", tags: ["pos"] },
+      { t: "Sports slice", m: "n=41", d: "market wins · killed at gate 2", tags: ["neg"] },
+      { t: "Crypto slice", m: "n=18", d: "insufficient sample", tags: ["warn"] },
+      { t: "Leak checks", m: "8 invariants", d: "all pass · in CI", tags: ["pos"] },
+    ]
+  }
+};
+
+const subtitles = {
+  ask: "read-only · scan / explain",
+  lab: "sandbox · hypo / backtest",
+  live: "real money · gated",
+  library: "objects · 5 types",
+  markets: "scanner · category split",
+  eval: "brier · ece · baseline"
+};
+
+function tagLabel(t) {
+  const map = {
+    draft: "draft", "state-draft": "draft", "state-lab": "lab",
+    "state-paper": "paper", "state-live": "live",
+    pos: "edge", neg: "no edge", warn: "watch", info: "note"
+  };
+  return map[t] || t;
+}
+
+function renderList(view) {
+  const d = listData[view] || listData.ask;
+  document.getElementById("listTitle").textContent = d.title;
+  document.getElementById("listSub").textContent = d.sub;
+  document.getElementById("crumbMode").textContent = d.title;
+  document.getElementById("crumbView").textContent = subtitles[view] || "";
+  document.getElementById("listScroll").innerHTML = d.items.map((it, i) => `
+    <button class="obj ${i === 0 ? "active" : ""}" data-toast="已打开 ${it.t}">
+      <div class="top"><strong>${it.t}</strong><span class="meta">${it.m}</span></div>
+      <div class="desc">${it.d}</div>
+      ${it.tags.length ? `<div class="tags">${it.tags.map(t => `<span class="tag ${t}">${tagLabel(t)}</span>`).join("")}</div>` : ""}
+    </button>
+  `).join("");
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function switchView(view) {
+  const btn = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if (!btn) return;
+  document.querySelectorAll(".nav-item[data-view]").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === `view-${view}`));
+  renderList(view);
+}
+
+document.querySelectorAll(".nav-item[data-view]").forEach(b => {
+  b.addEventListener("click", () => switchView(b.dataset.view));
+});
+
+/* Segmented controls */
+document.querySelectorAll(".seg").forEach(seg => {
+  seg.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    seg.querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b));
+    showToast(`已切换到 ${b.textContent.trim()}`);
+  });
+});
+
+/* Table row selection */
+document.addEventListener("click", e => {
+  const row = e.target.closest("tbody tr");
+  if (row) {
+    row.closest("table").querySelectorAll("tbody tr").forEach(r => r.classList.remove("active"));
+    row.classList.add("active");
+  }
+});
+
+/* Generic button → toast (except wired ones) */
+document.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.view || b.id === "sendBtn" || b.id === "runBtn" ||
+      b.id === "snapshotBtn" || b.id === "refreshBtn" || b.id === "themeBtn") return;
+  if (b.closest(".seg")) return;
+  if (b.closest(".artifact-actions") && b.dataset.toast) { showToast(b.dataset.toast); return; }
+  if (b.dataset.toast) { showToast(b.dataset.toast); return; }
+  const txt = b.textContent.trim();
+  if (txt && !b.classList.contains("chip")) showToast(`${txt} · action recorded`);
+});
+
+/* Chips populate the prompt */
+document.querySelectorAll(".chip").forEach(c => {
+  c.addEventListener("click", () => {
+    if (document.getElementById("view-ask").classList.contains("active")) {
+      document.getElementById("prompt").value = c.textContent;
+    } else {
+      showToast(`已应用: ${c.textContent}`);
+    }
+  });
+});
+
+/* Object cards in list */
+document.getElementById("listScroll").addEventListener("click", e => {
+  const card = e.target.closest(".obj");
+  if (card && card.dataset.toast) showToast(card.dataset.toast);
+});
+
+/* Send button — appends a message + tool run + (sometimes) artifact */
+document.getElementById("sendBtn").addEventListener("click", () => {
+  const p = document.getElementById("prompt");
+  const text = p.value.trim() || "跑 90 天 crypto 回测";
+  const m = document.getElementById("messages");
+  m.insertAdjacentHTML("beforeend", `
+    <div class="msg"><div class="avatar">you</div><div class="bubble"><p>${text}</p></div></div>
+    <div class="msg">
+      <div class="avatar">ai</div>
+      <div class="bubble">
+        <p>已记录为 Lab 实验，快照已锁定。结果只进评估账本，不会自动影响 paper 或 live。</p>
+        <div class="tool-run"><span class="name">run_backtest</span> { hypothesis: "H-006", window: "90d", pit: <span class="ok">true</span> }</div>
+      </div>
+    </div>
+  `);
+  p.value = "";
+  m.scrollTop = m.scrollHeight;
+});
+
+/* Top bar actions */
+document.getElementById("runBtn").addEventListener("click", () => {
+  switchView("markets");
+  showToast("已跳转 Markets · 启动候选扫描");
+});
+document.getElementById("snapshotBtn").addEventListener("click", () => {
+  switchView("ask");
+  const m = document.getElementById("messages");
+  m.insertAdjacentHTML("beforeend", `
+    <div class="msg">
+      <div class="avatar">ai</div>
+      <div class="bubble">
+        <p>Snapshot manifest 创建完成。所有 <span class="mono">available_at</span> 早于 <span class="mono">prediction_time</span>，RAG 启用时间过滤。</p>
+        <div class="tool-run"><span class="name">market_snapshot</span> { snapshot_id: <span class="ok">"snap_demo_0622"</span>, leak_check: <span class="ok">"pass"</span> }</div>
+      </div>
+    </div>
+  `);
+  m.scrollTop = m.scrollHeight;
+});
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  showToast("工作区已刷新 · 所有指标来自锁定快照");
+});
+
+/* Theme */
+function applyTheme(theme) {
+  document.body.classList.toggle("light", theme === "light");
+  localStorage.setItem("aihf-theme", theme);
+  showToast(theme === "light" ? "已切换 Light" : "已切换 Dark");
+}
+function toggleTheme() {
+  applyTheme(document.body.classList.contains("light") ? "dark" : "light");
+}
+document.getElementById("themeBtn").addEventListener("click", toggleTheme);
+if (localStorage.getItem("aihf-theme") === "light") document.body.classList.add("light");
+
+renderList("ask");
+</script>
+</body>
+</html>

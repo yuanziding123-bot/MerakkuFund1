@@ -86,9 +86,9 @@ def list_mcp_servers() -> list[dict]:
     return out
 
 
-def _parse_skill(text: str) -> tuple[str, str, str]:
-    """Return (name, description, body) from a SKILL.md (--- frontmatter ---)."""
-    name = desc = ""
+def _parse_skill(text: str) -> tuple[str, str, str, str]:
+    """Return (name, description, category, body) from a SKILL.md frontmatter."""
+    name = desc = category = ""
     body = text
     if text.startswith("---"):
         parts = text.split("---", 2)
@@ -99,11 +99,13 @@ def _parse_skill(text: str) -> tuple[str, str, str]:
                     name = line.split(":", 1)[1].strip()
                 elif line.lower().startswith("description:"):
                     desc = line.split(":", 1)[1].strip()
-    return name, desc, body.strip()
+                elif line.lower().startswith("category:"):
+                    category = line.split(":", 1)[1].strip()
+    return name, desc, category, body.strip()
 
 
 def list_skills() -> list[dict]:
-    """All registered skills: id (folder), name, description, body."""
+    """All registered skills: id (folder), name, description, category, body."""
     out: list[dict] = []
     if not _SKILLS_DIR.exists():
         return out
@@ -112,10 +114,11 @@ def list_skills() -> list[dict]:
         if not f.exists():
             continue
         try:
-            name, desc, body = _parse_skill(f.read_text(encoding="utf-8"))
+            name, desc, category, body = _parse_skill(f.read_text(encoding="utf-8"))
         except OSError:
             continue
-        out.append({"id": d.name, "name": name or d.name, "description": desc, "body": body})
+        out.append({"id": d.name, "name": name or d.name, "description": desc,
+                    "category": category or "General", "body": body})
     return out
 
 
