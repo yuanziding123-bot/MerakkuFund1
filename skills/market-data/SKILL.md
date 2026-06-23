@@ -21,6 +21,29 @@ discipline to MerakkuFund's prediction-market tools.
 4. Summarize only what the tools return. If liquidity, spread, or flow is weak,
    say that the read is fragile.
 
+## AIHF v0.2 Object Flow
+
+This skill starts in **Ask** mode and is read-only. Its output should be framed
+as a `Market` object candidate. When the user wants validation, the agent should
+create or reference a `Hypothesis` in Lab rather than jumping straight to a
+trade.
+
+Canonical flow:
+
+```text
+Market -> Hypothesis -> Strategy -> Position -> Portfolio
+```
+
+For MarketLens-style research, use:
+
+```text
+Market -> Hypothesis -> Backtest -> Risk Evaluation -> EvaluationReport -> Promotion Recommendation
+```
+
+Every object reference should carry a point-in-time `snapshotId`, state, and
+lineage. The agent may recommend promotion, but must not mutate state without an
+explicit gate.
+
 ## Interpretation
 
 - Tight spread plus balanced depth: cleaner price discovery, lower execution drag.
@@ -35,3 +58,6 @@ discipline to MerakkuFund's prediction-market tools.
   the data.
 - For action, switch to `polymarket-trading` so sizing and paper execution go
   through `size_position` and `paper_execute`.
+- pi.dev, if used, is only an optional Ask/Lab chat or coding harness connected
+  through MCP. It is not the financial engine and must not bypass the object
+  flow or promotion gates.

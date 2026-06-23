@@ -24,6 +24,18 @@ adapts Vibe-Trading's persistent-memory discipline to MerakkuFund's
 5. Future signal prompts should carry recent lessons forward before estimating
    a new `p_true`.
 
+## AIHF v0.2 Object Memory
+
+Memory should attach to object lineage rather than free-floating prompt context:
+
+- `Market` memory: recurring liquidity, spread, or category caveats.
+- `Hypothesis` memory: assumptions and falsification criteria.
+- `Strategy` memory: backtest and risk findings.
+- `Position` / `Portfolio` memory: settlement outcomes and risk breaches.
+
+Lessons are evidence for future reports. They do not promote objects and should
+not silently alter live behavior.
+
 ## Lesson format
 
 ```text
@@ -37,3 +49,5 @@ Next time, [specific adjustment].
 - Do not store secrets, keys, private user data, or unsupported claims.
 - Do not let one lucky win become a broad rule. Prefer patterns confirmed by
   multiple resolved markets.
+- pi.dev session memory, if used, is secondary to AIHF object lineage and audit
+  records.

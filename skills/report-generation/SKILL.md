@@ -49,6 +49,33 @@ research and paper trading.
 Research only. Not investment advice.
 ```
 
+## AIHF v0.2 EvaluationReport
+
+When reporting a Lab backtest, always pair Markdown with a machine-readable
+`EvaluationReport` JSON:
+
+```json
+{
+  "hypothesisId": "hyp-...",
+  "strategyId": "strat-...",
+  "inputQuery": "bitcoin",
+  "parameters": {},
+  "marketCount": 0,
+  "tradeCount": 0,
+  "totalPnl": 0,
+  "winRate": 0,
+  "maxDrawdown": 0,
+  "sharpe": 0,
+  "profitFactor": 0,
+  "riskRating": "High",
+  "caveats": [],
+  "promotionRecommendation": "remain_draft"
+}
+```
+
+The Markdown summary should explain the recommendation, but the recommendation
+itself must come from deterministic rules, not an LLM judgment.
+
 ## Rules
 
 - Put the conclusion first.
@@ -57,3 +84,5 @@ Research only. Not investment advice.
 - For backtests, include sample size, period, hit rate or loss metrics, and
   whether the model beats the market baseline.
 - End with a research-only disclaimer.
+- If pi.dev is used as the chat shell, describe it as an optional MCP harness.
+  Do not describe pi.dev as the AIHF core engine.

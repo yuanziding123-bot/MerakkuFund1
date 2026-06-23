@@ -18,12 +18,12 @@ EXPECTED_SKILLS = {
 }
 
 EXPECTED_TOOL_HINTS = {
-    "market-data": ("scan_markets", "market_snapshot"),
-    "backtest": ("evaluation_report",),
+    "market-data": ("scan_markets", "market_snapshot", "Market -> Hypothesis"),
+    "backtest": ("evaluation_report", "EvaluationReport", "promotionRecommendation"),
     "execution-model": ("size_position", "paper_execute"),
-    "risk-analysis": ("portfolio_status", "pnl_report"),
-    "report-generation": ("Research only",),
-    "memory": ("settle_markets", "pnl_report"),
+    "risk-analysis": ("portfolio_status", "pnl_report", "promote_to_paper"),
+    "report-generation": ("Research only", "EvaluationReport"),
+    "memory": ("settle_markets", "pnl_report", "object lineage"),
 }
 
 
@@ -51,3 +51,5 @@ def test_migration_report_exists():
     text = report.read_text(encoding="utf-8")
     for skill_id in EXPECTED_SKILLS:
         assert skill_id in text
+    assert "AIHF v0.2" in text
+    assert "pi.dev is not the core engine" in text

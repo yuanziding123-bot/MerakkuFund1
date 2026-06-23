@@ -12,14 +12,32 @@ methodology to binary payout markets.
 
 ## Workflow
 
-1. Use `portfolio_status()` to inspect cash, exposure, open positions, and
+1. Identify the object under review: `Hypothesis`, `Strategy`, `Position`, or
+   `Portfolio`.
+2. Use `portfolio_status()` to inspect cash, exposure, open positions, and
    realized P&L.
-2. Use `size_position(p_true, token_id)` to inspect calibrated edge, Kelly
+3. Use `size_position(p_true, token_id)` to inspect calibrated edge, Kelly
    fraction, annualized edge, and risk-gate reasons.
-3. Use `pnl_report()` after settlements to review hit rate, realized P&L, and
+4. Use `pnl_report()` after settlements to review hit rate, realized P&L, and
    decision mix.
-4. Use `evaluation_report()` to check whether estimated probabilities are
+5. Use `evaluation_report()` to check whether estimated probabilities are
    calibrated and whether they beat market prices.
+6. Feed the risk result into an `EvaluationReport` and deterministic
+   `promotionRecommendation`.
+
+## AIHF v0.2 Promotion Gates
+
+Risk evaluation is evidence for gates; it does not mutate state by itself.
+
+- `Hypothesis` remains `draft` when sample size is small or risk is high.
+- `Strategy` can be recommended for `paper` only when risk is not high and the
+  backtest has enough trades, positive P&L, acceptable drawdown, Sharpe, and
+  profit factor.
+- `Position` and `Portfolio` checks can block additional exposure, but cannot
+  create new hypotheses or strategies.
+
+The agent should state one recommendation: `remain_draft`, `promote_to_lab`, or
+`promote_to_paper`.
 
 ## Risk checks
 
@@ -43,3 +61,6 @@ For open positions, state:
 - whether the circuit breaker would block another order
 
 Do not recommend increasing exposure when the risk gate already says hold.
+
+pi.dev may be used as an optional chat/coding harness through MCP. It should
+surface risk evidence and tool outputs, not replace deterministic risk gates.
