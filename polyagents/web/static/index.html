@@ -375,6 +375,23 @@
   .cfly-row .pc{width:18px;height:18px;border:1px solid var(--line);border-radius:6px;flex:0 0 18px;display:grid;place-items:center;font-size:12px;color:transparent;margin-top:1px}
   .cfly-row.on .pc{background:var(--accent);border-color:var(--accent);color:#04130d}
   .cfly-row .pn{font-weight:600;font-size:13px} .cfly-row .pd{color:var(--muted);font-size:11.5px;margin-top:2px}
+  /* ── Ask uploads (drag-drop + attachment chips) ───────────── */
+  .cbox.dragging{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .drop-hint{display:none;position:absolute;inset:0;border-radius:16px;background:rgba(52,211,154,.07);
+       align-items:center;justify-content:center;color:var(--accent);font-size:14px;font-weight:600;z-index:5;pointer-events:none}
+  .cbox.dragging .drop-hint{display:flex}
+  .attach-bar{display:none;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+  .attach-bar.has{display:flex}
+  .achip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--bg);
+       border-radius:9px;padding:6px 8px;font-size:12px;max-width:230px}
+  .achip.err{border-color:#5a2530;color:#ff9aa6}
+  .achip .ai{font-size:13px;flex:0 0 auto}
+  .achip .an{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .achip .as{color:var(--muted);font-size:11px;flex:0 0 auto}
+  .achip .ax{flex:0 0 auto;color:var(--muted);width:16px;height:16px;display:grid;place-items:center;border-radius:50%}
+  .achip .ax:hover{background:var(--panel2);color:var(--text)}
+  .achip .spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:aspin .7s linear infinite}
+  @keyframes aspin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -503,19 +520,24 @@
       </div></div>
 
       <div class="composer">
-        <div class="cbox">
-          <textarea id="input" rows="1" placeholder="Ask…  (Enter 发送 · Shift+Enter 换行)"></textarea>
+        <input type="file" id="fileInput" multiple hidden
+               accept=".txt,.md,.csv,.tsv,.json,.log,.py,.ts,.js,.yaml,.yml,.html,.xml,.sql,.pdf,.png,.jpg,.jpeg,.webp,.gif"
+               onchange="uploadFiles(this.files); this.value=''">
+        <div class="cbox" id="cbox" ondragover="dropOver(event)" ondragleave="dropLeave(event)" ondrop="dropFiles(event)">
+          <div id="attachBar" class="attach-bar"></div>
+          <textarea id="input" rows="1" placeholder="Ask…  (Enter 发送 · Shift+Enter 换行 · 拖文件进来添加)"></textarea>
+          <div id="dropHint" class="drop-hint">松开以添加文件</div>
           <div class="ctoolbar">
             <button class="cplus" id="plusBtn" title="Add" onclick="toggleCMenu(event,'plusMenu')">＋</button>
             <button class="ctbtn" title="模式(Ask 只读)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>Chat</button>
             <button class="ctbtn" id="modelBtn" title="模型" onclick="toggleCMenu(event,'modelMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span id="modelLbl">Sonnet 4.6</span><span class="cv">▾</span></button>
             <span class="cspacer"></span>
-            <button class="cicon" title="附件(二期)" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17a1.5 1.5 0 0 1-2-2l8-8"/></svg></button>
+            <button class="cicon" title="附件" onclick="document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17a1.5 1.5 0 0 1-2-2l8-8"/></svg></button>
             <button class="csend" id="send" title="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
           </div>
 
           <div class="cpop" id="plusMenu">
-            <button class="cmi disabled" title="二期"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3v5h5M14 3l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>Upload files<span class="csoon">soon</span></button>
+            <button class="cmi" onclick="closeCMenus();document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3v5h5M14 3l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>Upload files</button>
             <button class="cmi" onmouseenter="openSkillsFly()" onclick="openSkillsFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2a7 7 0 0 0-4-12z"/></svg>Skills<span class="cchev">›</span></button>
             <button class="cmi disabled" title="二期"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Projects<span class="csoon">soon</span></button>
           </div>
@@ -765,6 +787,38 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if(e.key === 'Escape') closeCMenus(); });
 
+// ---- uploads (drag-drop + attachment chips) ----
+let pendingAtt = [];                 // [{id?,name,kind,size,chars?,error?,uploading?}]
+const KIND_ICON = {text:'📄', pdf:'📕', image:'🖼️'};
+function renderAttachBar(){
+  const bar = document.getElementById('attachBar'); if(!bar) return;
+  bar.classList.toggle('has', pendingAtt.length>0);
+  bar.innerHTML = pendingAtt.map((a,i)=>{
+    if(a.uploading) return `<div class="achip"><span class="spin"></span><span class="an">${esc(a.name)}</span></div>`;
+    if(a.error) return `<div class="achip err"><span class="ai">⚠</span><span class="an">${esc(a.name)}</span><span class="as">${esc(a.error)}</span><span class="ax" onclick="removeAtt(${i})">×</span></div>`;
+    const meta = a.kind==='image' ? (a.media_type||'') : (a.chars!=null ? a.chars+'字'+(a.pages?'·'+a.pages+'p':'') : '');
+    return `<div class="achip"><span class="ai">${KIND_ICON[a.kind]||'📎'}</span><span class="an">${esc(a.name)}</span><span class="as">${esc(meta)}</span><span class="ax" onclick="removeAtt(${i})">×</span></div>`;
+  }).join('');
+}
+function removeAtt(i){ pendingAtt.splice(i,1); renderAttachBar(); }
+async function uploadFiles(fileList){
+  const files = Array.from(fileList||[]); if(!files.length) return;
+  const start = pendingAtt.length;
+  files.forEach(f => pendingAtt.push({name:f.name, uploading:true}));
+  renderAttachBar();
+  const fd = new FormData(); files.forEach(f => fd.append('files', f));
+  try{
+    const r = await (await fetch('/api/upload',{method:'POST',body:fd})).json();
+    const res = r.files||[];
+    for(let k=0;k<files.length;k++) pendingAtt[start+k] = res[k] || {name:files[k].name, error:'upload failed'};
+  }catch(e){ for(let k=0;k<files.length;k++) pendingAtt[start+k] = {name:files[k].name, error:String(e)}; }
+  renderAttachBar();
+}
+function dropOver(e){ e.preventDefault(); document.getElementById('cbox').classList.add('dragging'); }
+function dropLeave(e){ if(!e.relatedTarget || !document.getElementById('cbox').contains(e.relatedTarget)) document.getElementById('cbox').classList.remove('dragging'); }
+function dropFiles(e){ e.preventDefault(); document.getElementById('cbox').classList.remove('dragging');
+  if(e.dataTransfer && e.dataTransfer.files) uploadFiles(e.dataTransfer.files); }
+
 // ---- portfolio ----
 async function loadPortfolio(){
   try{
@@ -865,15 +919,19 @@ function scroll(){ const c=document.getElementById('log'); c.scrollTop=c.scrollH
 
 async function send(){
   const text = input.value.trim();
-  if(!text || busy) return;
+  const attIds = pendingAtt.filter(a=>a.id).map(a=>a.id);
+  const attNames = pendingAtt.filter(a=>a.id).map(a=>a.name);
+  if((!text && !attIds.length) || busy) return;
   busy=true; sendBtn.disabled=true;
-  addMsg('user', text); history.push({role:'user', content:text});
+  const shown = text + (attNames.length ? `\n\n📎 ${attNames.join(', ')}` : '');
+  addMsg('user', shown); history.push({role:'user', content:text || '(see attached files)'});
   input.value=''; input.style.height='auto';
+  pendingAtt = []; renderAttachBar();                 // consume attachments this turn
   const bubble = addMsg('assistant',''); const cur=document.createElement('span'); cur.className='cursor'; bubble.appendChild(cur);
   let acc='';
   try{
     const res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({messages:history, skills:[...selected], model:selectedModel})});
+        body:JSON.stringify({messages:history, skills:[...selected], model:selectedModel, attachments:attIds})});
     const reader=res.body.getReader(); const dec=new TextDecoder(); let buf='';
     while(true){
       const {value,done}=await reader.read(); if(done) break;
