@@ -166,15 +166,35 @@ def _compose_prompt(selected_ids: list[str] | None) -> str:
 
 # ----- agent -----------------------------------------------------------------
 
-def build_agent(selected_ids: list[str] | None = None, llm=None):
-    """Compile the ReAct agent (Claude + tools + selected skills' prompt)."""
+# Models the Ask composer's selector offers. Keys are what the UI sends; values
+# are the real Anthropic model ids. The default falls back to the config model.
+ASK_MODELS: dict[str, str] = {
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+    "claude-opus-4-8": "claude-opus-4-8",
+    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+}
+
+
+def resolve_model(name: str | None) -> str:
+    """Validate a requested model against the allow-list; fall back to default."""
+    if name and name in ASK_MODELS:
+        return ASK_MODELS[name]
+    return DEFAULT_CONFIG["anthropic_model"]
+
+
+def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | None = None):
+    """Compile the ReAct agent (Claude + tools + selected skills' prompt).
+
+    ``model`` (from the Ask composer's selector) is validated against
+    :data:`ASK_MODELS`; an unknown / missing value uses the configured default.
+    """
     from langgraph.prebuilt import create_react_agent
 
     if llm is None:
         from langchain_anthropic import ChatAnthropic
 
         llm = ChatAnthropic(
-            model=DEFAULT_CONFIG["anthropic_model"],
+            model=resolve_model(model),
             temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0),
         )
     return create_react_agent(llm, build_tools(), prompt=_compose_prompt(selected_ids))

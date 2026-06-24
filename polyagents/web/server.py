@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +31,7 @@ from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
 
 from .agent import build_agent, list_mcp_servers, list_skills
+from .uploads import UploadCache, build_message_content, extract, public_view
 
 _REPO = str(Path(__file__).resolve().parents[2])
 
@@ -359,19 +360,44 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-def _to_lc_messages(history: list[dict]) -> list[tuple[str, str]]:
+_UPLOADS = UploadCache()
+
+
+def _to_lc_messages(history: list[dict]) -> list:
     return [("assistant" if m.get("role") == "assistant" else "user", str(m.get("content", "")))
             for m in history]
 
 
-async def _stream(history: list[dict], skills: list[str]) -> AsyncIterator[str]:
+@app.post("/api/upload")
+async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
+    """Accept dropped/attached files; extract their content for the agent and
+    cache it by id. Per-file errors don't fail the batch."""
+    out = []
+    for f in files:
+        try:
+            rec = extract(f.filename or "file", await f.read())
+            out.append(public_view(_UPLOADS.put(rec), rec))
+        except ValueError as exc:
+            out.append({"name": f.filename, "error": str(exc)})
+        except Exception as exc:
+            out.append({"name": f.filename, "error": f"extract failed: {exc}"})
+    return JSONResponse({"files": out})
+
+
+async def _stream(history: list[dict], skills: list[str], model: str | None = None,
+                  attachments: list[str] | None = None) -> AsyncIterator[str]:
     try:
-        agent = build_agent(skills or None)
+        agent = build_agent(skills or None, model=model)
     except Exception as exc:
         yield _sse({"type": "error", "message": f"agent init failed: {exc}"})
         return
+    messages = _to_lc_messages(history)
+    records = [r for r in (_UPLOADS.get(a) for a in (attachments or [])) if r]
+    if records and messages and messages[-1][0] == "user":
+        last_text = messages[-1][1] if isinstance(messages[-1][1], str) else ""
+        messages[-1] = ("user", build_message_content(last_text, records))
     try:
-        async for ev in agent.astream_events({"messages": _to_lc_messages(history)}, version="v2"):
+        async for ev in agent.astream_events({"messages": messages}, version="v2"):
             kind = ev.get("event")
             if kind == "on_chat_model_stream":
                 text = _text_of(ev["data"]["chunk"].content)
@@ -391,4 +417,7 @@ async def chat(request: Request) -> StreamingResponse:
     body = await request.json()
     history = body.get("messages", [])
     skills = body.get("skills", [])
-    return StreamingResponse(_stream(history, skills), media_type="text/event-stream")
+    model = body.get("model")
+    attachments = body.get("attachments", [])
+    return StreamingResponse(_stream(history, skills, model, attachments),
+                             media_type="text/event-stream")
