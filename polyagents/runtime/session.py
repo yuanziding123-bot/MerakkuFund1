@@ -1,68 +1,115 @@
-"""AgentSession — one field (``mode``) decides three things (v0.2 PRD §八-B).
-
-    session = AgentSession(mode="ask")
-    session.readonly        # → which tool subset to inject (ToolManifest)
-    session.policy          # → what's allowed (PermissionPolicy)
-    session.log(...)        # → audit strength (to an AuditSink)
-
-There is no "three engines" — just this small coordinator plus three configs.
-``ask`` is read-only (no trading), ``lab`` is the paper sandbox, ``live`` is the
-gated real-money mode. The session does NOT build the LLM agent itself; the web
-layer reads ``session.readonly`` and calls ``build_tools(readonly=...)`` — keeping
-this module free of LLM / web imports so it stays trivially testable.
-"""
+"""AgentSession: one mode decides tool scope, permissions, and audit behavior."""
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 Mode = Literal["ask", "lab", "live"]
 
 
+class PermissionDenied(RuntimeError):
+    code = "permission_denied"
+
+    def __init__(self, tool_name: str) -> None:
+        super().__init__(f"permission denied for tool: {tool_name}")
+        self.tool_name = tool_name
+
+
 @dataclass(frozen=True)
 class PermissionPolicy:
-    """What a mode may do. The tool subset enforces it; this documents/guards it."""
+    """What a mode may do."""
+
     mode: Mode
-    readonly: bool          # inject only read-only tools (no side effects)
-    can_trade: bool         # place real/paper orders
-    can_promote: bool       # create/advance objects (gate transitions)
-    audit_tool_calls: bool  # log every tool.call, not just session start/end
+    readonly: bool
+    can_trade: bool
+    can_promote: bool
+    audit_tool_calls: bool
+    allowed_tools: set[str]
 
     @classmethod
     def for_mode(cls, mode: str) -> "PermissionPolicy":
         if mode == "ask":
-            return cls("ask", readonly=True, can_trade=False, can_promote=True,
-                       audit_tool_calls=True)
+            return cls(
+                "ask",
+                readonly=True,
+                can_trade=False,
+                can_promote=True,
+                audit_tool_calls=True,
+                allowed_tools={"scan_markets", "market_snapshot", "evaluate_forecast"},
+            )
         if mode == "lab":
-            return cls("lab", readonly=False, can_trade=False, can_promote=True,
-                       audit_tool_calls=True)
+            return cls(
+                "lab",
+                readonly=False,
+                can_trade=False,
+                can_promote=True,
+                audit_tool_calls=True,
+                allowed_tools={
+                    "scan_markets",
+                    "market_snapshot",
+                    "evaluate_forecast",
+                    "create_hypothesis",
+                    "run_backtest",
+                    "write_forecast",
+                    "write_evaluation",
+                },
+            )
         if mode == "live":
-            return cls("live", readonly=False, can_trade=True, can_promote=False,
-                       audit_tool_calls=True)
+            return cls(
+                "live",
+                readonly=False,
+                can_trade=True,
+                can_promote=False,
+                audit_tool_calls=True,
+                allowed_tools={"market_snapshot", "evaluate_forecast", "submit_order", "halt"},
+            )
         raise ValueError(f"unknown mode: {mode!r}")
+
+    def allows(self, tool_name: str) -> bool:
+        return tool_name in self.allowed_tools
+
+
+@dataclass
+class LocalAuditSink:
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+    def log_local(self, event_type: str, **payload: Any) -> None:
+        self.events.append({"event_type": event_type, "payload": payload})
 
 
 class AgentSession:
     """A mode-scoped run context with an audit trail.
 
-    ``audit`` is any object with ``.log(session_id, event_type, payload, mode)``
-    (e.g. :class:`polyagents.storage.audit_store.AuditStore`), or None.
+    ``audit`` may be any object exposing
+    ``log(session_id, event_type, payload, mode=...)``. If omitted, an in-memory
+    sink is used for tests and local permission diagnostics.
     """
+
     def __init__(self, mode: str = "ask", *, tenant: str = "default", audit=None) -> None:
         self.id = "s_" + uuid.uuid4().hex[:10]
         self.mode = mode
         self.tenant = tenant
         self.policy = PermissionPolicy.for_mode(mode)
-        self.audit = audit
+        self.permissions = self.policy
+        self.audit = audit if audit is not None else LocalAuditSink()
 
     @property
     def readonly(self) -> bool:
         return self.policy.readonly
 
-    def log(self, event_type: str, **payload) -> None:
-        if self.audit is not None:
-            try:
+    def log(self, event_type: str, **payload: Any) -> None:
+        try:
+            if hasattr(self.audit, "log_local"):
+                self.audit.log_local(event_type, **payload)
+            else:
                 self.audit.log(self.id, event_type, payload, mode=self.mode)
-            except Exception:
-                pass            # audit must never break the run
+        except Exception:
+            pass
+
+    def call_tool(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if not self.policy.allows(tool_name):
+            self.log("permission.denied", tool=tool_name, args=args, mode=self.mode)
+            raise PermissionDenied(tool_name)
+        self.log("tool.call", tool=tool_name, args=args, mode=self.mode)
+        return {"ok": True, "tool": tool_name}

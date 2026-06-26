@@ -1,4 +1,6 @@
-"""Runtime — the thin mode-scoped session layer (v0.2 PRD §八-B)."""
-from .session import AgentSession, PermissionPolicy
+"""Runtime: the thin mode-scoped session layer."""
+from __future__ import annotations
 
-__all__ = ["AgentSession", "PermissionPolicy"]
+from .session import AgentSession, PermissionDenied, PermissionPolicy
+
+__all__ = ["AgentSession", "PermissionDenied", "PermissionPolicy"]
