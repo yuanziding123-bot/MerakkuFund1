@@ -392,6 +392,22 @@
   .achip .ax:hover{background:var(--panel2);color:var(--text)}
   .achip .spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:aspin .7s linear infinite}
   @keyframes aspin{to{transform:rotate(360deg)}}
+  /* ── emergent Hypothesis artifact card (Ask → gate 1) ─────── */
+  .artifact{margin:10px 0 4px;border:1px solid var(--line);background:var(--panel2);border-radius:12px;overflow:hidden;max-width:560px}
+  .art-h{display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .art-h .type{font:11px/1 ui-monospace,monospace;color:var(--info,#9fb9d6);border:1px solid #34507a;border-radius:5px;padding:3px 6px}
+  .art-h .ttl{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .art-h .st{margin-left:auto;font:11px/1 ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 8px}
+  .art-h .st.lab{color:var(--accent2);border-color:#2c4a7a}
+  .art-b{padding:12px 13px}
+  .art-b .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px;margin:0}
+  .art-b .kv dt{color:var(--muted)} .art-b .kv dd{margin:0;color:var(--text)}
+  .art-act{display:flex;gap:8px;padding:0 13px 13px}
+  .art-act button{border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:12.5px;color:var(--text)}
+  .art-act .promote{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#04130d;border:0;font-weight:700}
+  .art-act button:not(.promote):hover{border-color:var(--accent)}
+  .art-act button:disabled{opacity:.6;cursor:default}
+  .art-note{padding:0 13px 12px;font-size:12px;color:var(--accent)}
 </style>
 </head>
 <body>
@@ -819,6 +835,39 @@ function dropLeave(e){ if(!e.relatedTarget || !document.getElementById('cbox').c
 function dropFiles(e){ e.preventDefault(); document.getElementById('cbox').classList.remove('dragging');
   if(e.dataTransfer && e.dataTransfer.files) uploadFiles(e.dataTransfer.files); }
 
+// ---- emergent Hypothesis (Ask → gate 1): agent proposes → user Promotes ----
+function renderHypothesisCard(args){
+  const stmt = args.statement || '(untitled hypothesis)';
+  const card = document.createElement('div'); card.className='artifact';
+  card.innerHTML =
+    `<div class="art-h"><span class="type">HYPOTHESIS</span>
+       <span class="ttl">${esc(stmt.slice(0,60))}</span><span class="st">draft</span></div>
+     <div class="art-b"><dl class="kv">
+       <dt>statement</dt><dd>${esc(stmt)}</dd>
+       <dt>category</dt><dd>${esc(args.category||'—')}</dd>
+       <dt>features</dt><dd>${esc(args.feature_set||'—')}</dd>
+       <dt>success</dt><dd>${esc(args.success_criteria||'—')}</dd></dl></div>
+     <div class="art-act"><button class="promote">Promote to Lab</button><button class="dismiss">Dismiss</button></div>`;
+  card.querySelector('.dismiss').onclick = () => card.remove();
+  card.querySelector('.promote').onclick = () => promoteProposed(card, args);
+  log.appendChild(card); scroll();
+}
+async function promoteProposed(card, args){
+  const btn = card.querySelector('.promote'); btn.disabled=true; btn.textContent='Promoting…';
+  try{
+    const r = await (await fetch('/api/objects',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({statement:args.statement||'', category:args.category||'',
+        feature_set:args.feature_set||''})})).json();
+    if(r.error){ alert(r.error); btn.disabled=false; btn.textContent='Promote to Lab'; return; }
+    const st=card.querySelector('.st'); st.textContent='lab'; st.classList.add('lab');
+    card.querySelector('.art-act').remove();
+    const note=document.createElement('div'); note.className='art-note';
+    note.textContent='✓ Promoted '+r.id+' → Lab (gate 1)';
+    card.appendChild(note);
+    if(typeof loadObjects==='function') loadObjects();   // refresh Objects/Lab badge
+  }catch(e){ alert(e); btn.disabled=false; btn.textContent='Promote to Lab'; }
+}
+
 // ---- portfolio ----
 async function loadPortfolio(){
   try{
@@ -941,7 +990,9 @@ async function send(){
         if(!line.startsWith('data:')) continue;
         const ev=JSON.parse(line.slice(5).trim());
         if(ev.type==='token'){ acc+=ev.text; bubble.textContent=acc; bubble.appendChild(cur); }
-        else if(ev.type==='tool'){ if(cur.parentNode)cur.remove(); addTool(ev.name,ev.args); }
+        else if(ev.type==='tool'){ if(cur.parentNode)cur.remove();
+          if(ev.name==='propose_hypothesis') renderHypothesisCard(ev.args||{});
+          else addTool(ev.name,ev.args); }
         else if(ev.type==='error'){ acc+=(acc?'\n\n':'')+'⚠ '+ev.message; bubble.textContent=acc; }
         scroll();
       }

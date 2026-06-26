@@ -20,6 +20,17 @@ def test_write_tools_present_only_in_full_surface():
     assert "paper_execute" in full and "size_position" in full
 
 
+def test_propose_hypothesis_is_readonly_and_available_in_ask():
+    from polyagents.web.agent import propose_hypothesis
+
+    names = {t.name for t in build_tools(readonly=True)}
+    assert "propose_hypothesis" in names             # Ask can surface ideas
+    assert "propose_hypothesis" not in WRITE_TOOLS    # but it only proposes
+    out = propose_hypothesis("crypto news beats market", category="crypto",
+                             feature_set="news_event")
+    assert isinstance(out, str) and "crypto news beats market" in out
+
+
 def test_known_model_is_passed_through():
     assert resolve_model("claude-opus-4-8") == "claude-opus-4-8"
     assert resolve_model("claude-haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
