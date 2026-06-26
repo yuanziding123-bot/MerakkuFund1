@@ -1,0 +1,33 @@
+name: aihf
+
+services:
+  aihf-web:
+    build: .
+    image: aihf-web:latest
+    container_name: aihf-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POLYAGENTS_WEB_HOST: 0.0.0.0
+      POLYAGENTS_WEB_PORT: 8000
+      HOME: /data
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - aihf-data:/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.aihf-web.rule: Host(`aihf.agentlab.studio`) || Host(`54.86.75.151`)
+      traefik.http.routers.aihf-web.entrypoints: web
+      traefik.http.services.aihf-web.loadbalancer.server.port: "8000"
+    networks:
+      - default
+      - agentlab-public
+
+volumes:
+  aihf-data:
+
+networks:
+  agentlab-public:
+    external: true

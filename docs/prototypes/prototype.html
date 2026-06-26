@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>aihf · Financial Agent Prototype</title>
+<style>
+  :root {
+    --primary: #f7f5f0;
+    --on-primary: #2b2622;
+    --ink: #f7f5f0;
+    --body: #c9c0ad;
+    --body-strong: #dad2c1;
+    --muted: #aea69c;
+    --canvas: #2b2622;
+    --canvas-2: #302b27;
+    --canvas-soft: #383330;
+    --canvas-raised: #403a35;
+    --hairline: #4a433d;
+    --hairline-soft: #3f3a36;
+    --green: #a8d8b0;
+    --red: #e7a0a0;
+    --amber: #e2c37a;
+    --blue: #9fb9d6;
+    --violet: #c5b3da;
+    --shadow: rgba(18, 15, 13, .45);
+  }
+  body.light {
+    --primary: #2b2622;
+    --on-primary: #f7f5f0;
+    --ink: #2b2622;
+    --body: #5f554d;
+    --body-strong: #3a332e;
+    --muted: #847970;
+    --canvas: #f7f5f0;
+    --canvas-2: #eee9df;
+    --canvas-soft: #e6dfd3;
+    --canvas-raised: #ddd5c8;
+    --hairline: #cfc5b6;
+    --hairline-soft: #dbd2c4;
+    --green: #2f7d48;
+    --red: #a64d4d;
+    --amber: #8a6816;
+    --blue: #3f6688;
+    --violet: #755d91;
+    --shadow: rgba(84, 70, 58, .18);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  button, input, textarea { font: inherit; }
+  button { cursor: pointer; }
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 224px 292px minmax(0, 1fr);
+    background: var(--canvas);
+  }
+
+  .nav {
+    border-right: 1px solid var(--hairline-soft);
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 6px 17px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .mark {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+  }
+  .mark:before, .mark:after {
+    content: "";
+    position: absolute;
+    background: var(--primary);
+  }
+  .mark:before {
+    width: 2px;
+    top: 5px;
+    bottom: 5px;
+    left: 12px;
+  }
+  .mark:after {
+    height: 2px;
+    left: 5px;
+    right: 5px;
+    top: 12px;
+  }
+  .brand strong {
+    display: block;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 18px;
+  }
+  .brand span {
+    color: var(--muted);
+    display: block;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .nav-group {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .section-label {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 16px;
+    margin: 0 8px 8px;
+  }
+  .nav button, .rail button, .toolbar button, .icon-button, .seg button, .chip, .action {
+    border: 1px solid transparent;
+    color: var(--body-strong);
+    background: transparent;
+    border-radius: 3px;
+  }
+  .nav-item {
+    width: 100%;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 9px;
+    margin: 2px 0;
+    text-align: left;
+  }
+  .nav-item svg, .tool-chip svg, .icon-button svg, .action svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+  .nav-item.active {
+    color: var(--ink);
+    background: var(--canvas-soft);
+    border-color: var(--hairline);
+  }
+  .nav-item:hover { color: var(--ink); background: #342f2b; }
+  .nav-foot {
+    margin-top: auto;
+    border-top: 1px solid var(--hairline-soft);
+    padding-top: 14px;
+  }
+  .status-pill {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--body);
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+    padding: 9px 10px;
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  .rail {
+    min-width: 0;
+    border-right: 1px solid var(--hairline-soft);
+    background: var(--canvas-2);
+    display: flex;
+    flex-direction: column;
+  }
+  .rail-head {
+    padding: 16px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .rail-head h2 {
+    margin: 0 0 10px;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 28px;
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 3px;
+    padding: 8px 10px;
+  }
+  .search svg { width: 15px; height: 15px; color: var(--muted); }
+  .search input {
+    min-width: 0;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .rail-scroll {
+    padding: 14px 12px;
+    overflow: auto;
+  }
+  .rail-card {
+    width: 100%;
+    text-align: left;
+    display: block;
+    background: transparent;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 6px;
+    color: var(--body);
+  }
+  .rail-card:hover, .rail-card.active {
+    background: var(--canvas-soft);
+    border-color: var(--hairline);
+    color: var(--ink);
+  }
+  .rail-card .top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .rail-card strong {
+    color: inherit;
+    font-weight: 500;
+  }
+  .rail-card p {
+    color: var(--muted);
+    margin: 5px 0 0;
+    font-size: 12px;
+    line-height: 17px;
+  }
+  .count {
+    color: var(--muted);
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  .workspace {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+  .topbar {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--body);
+    min-width: 0;
+  }
+  .crumbs strong { color: var(--ink); font-weight: 500; }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 99px;
+    background: var(--green);
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .icon-button {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-color: var(--hairline);
+    background: var(--canvas-soft);
+    color: var(--body-strong);
+  }
+  .icon-button:hover, .action:hover { color: var(--ink); border-color: var(--body); }
+  .action {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    background: var(--canvas-soft);
+    border-color: var(--hairline);
+  }
+  .action.primary {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
+  }
+
+  .view {
+    min-height: 0;
+    overflow: auto;
+    display: none;
+  }
+  .view.active { display: block; }
+  .dashboard {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(360px, .85fr);
+    gap: 1px;
+    background: var(--hairline-soft);
+    min-height: 100%;
+  }
+  .pane {
+    min-width: 0;
+    background: var(--canvas);
+    padding: 20px;
+  }
+  .pane.compact { background: var(--canvas-2); }
+  .pane-title {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  h1, h2, h3, p { margin-top: 0; }
+  h1 {
+    font-size: 38px;
+    line-height: 44px;
+    font-weight: 400;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 24px;
+    line-height: 31px;
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  h3 {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+  .lead {
+    color: var(--body);
+    font-size: 16px;
+    max-width: 720px;
+    margin-bottom: 0;
+  }
+  .muted { color: var(--muted); }
+  .mono {
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .mini { font-size: 12px; line-height: 16px; }
+  .grid-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid var(--hairline);
+    background: var(--hairline-soft);
+    gap: 1px;
+    margin: 18px 0;
+  }
+  .metric {
+    background: var(--canvas-soft);
+    padding: 14px;
+    min-width: 0;
+  }
+  .metric .k {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 16px;
+    margin-bottom: 8px;
+  }
+  .metric .v {
+    font-size: 24px;
+    line-height: 30px;
+    font-weight: 500;
+  }
+  .metric .s {
+    color: var(--body);
+    font-size: 12px;
+    line-height: 16px;
+    margin-top: 4px;
+  }
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+  .warn { color: var(--amber); }
+  .info { color: var(--blue); }
+
+  .terminal {
+    border: 1px solid var(--hairline);
+    background: #211d1a;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  body.light .terminal {
+    background: #fffaf0;
+  }
+  .terminal-bar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--hairline-soft);
+    padding: 0 11px;
+    color: var(--muted);
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .lamp { width: 8px; height: 8px; border-radius: 99px; background: var(--hairline); }
+  .terminal-body {
+    padding: 14px;
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 19px;
+    color: var(--body-strong);
+    min-height: 160px;
+  }
+  .terminal-body .cmd { color: var(--ink); }
+  .terminal-body .ok { color: var(--green); }
+  .terminal-body .dim { color: var(--muted); }
+  .terminal-body .bad { color: var(--red); }
+
+  .market-table, .ledger-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+  }
+  th, td {
+    border-bottom: 1px solid var(--hairline);
+    padding: 10px 11px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 400;
+    background: var(--canvas-2);
+  }
+  td { color: var(--body-strong); }
+  tr:last-child td { border-bottom: 0; }
+  .market-table tbody tr { cursor: pointer; }
+  .market-table tbody tr:hover, .market-table tbody tr.selected { background: var(--canvas-raised); }
+  .question {
+    color: var(--ink);
+    font-weight: 500;
+    max-width: 420px;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+    padding: 1px 6px;
+    color: var(--body);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+  .tag.green { color: var(--green); border-color: rgba(168,216,176,.45); }
+  .tag.red { color: var(--red); border-color: rgba(231,160,160,.45); }
+  .tag.amber { color: var(--amber); border-color: rgba(226,195,122,.45); }
+  .tag.blue { color: var(--blue); border-color: rgba(159,185,214,.45); }
+  .progress {
+    height: 7px;
+    background: #251f1c;
+    border: 1px solid var(--hairline-soft);
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 84px;
+  }
+  .progress span { display: block; height: 100%; background: var(--primary); }
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--hairline-soft);
+    border: 1px solid var(--hairline);
+    margin-bottom: 18px;
+  }
+  .block {
+    background: var(--canvas-soft);
+    padding: 14px;
+  }
+  .block p { color: var(--body); margin-bottom: 8px; }
+  .kv {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .kv:last-child { border-bottom: 0; }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child { color: var(--body-strong); font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .calibration {
+    height: 210px;
+    border: 1px solid var(--hairline);
+    background:
+      linear-gradient(to right, var(--hairline-soft) 1px, transparent 1px) 0 0 / 20% 100%,
+      linear-gradient(to top, var(--hairline-soft) 1px, transparent 1px) 0 0 / 100% 20%,
+      var(--canvas-soft);
+    position: relative;
+    margin: 12px 0 14px;
+    overflow: hidden;
+  }
+  .diag {
+    position: absolute;
+    left: 10%;
+    bottom: 10%;
+    width: 80%;
+    height: 1px;
+    background: var(--muted);
+    transform: rotate(-45deg);
+    transform-origin: left center;
+    opacity: .55;
+  }
+  .cal-line {
+    position: absolute;
+    left: 8%;
+    bottom: 14%;
+    width: 84%;
+    height: 60%;
+    border-left: 2px solid transparent;
+    border-bottom: 2px solid var(--green);
+    transform: skewX(-18deg) rotate(-2deg);
+  }
+  .bin {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 99px;
+    background: var(--primary);
+    border: 1px solid var(--on-primary);
+  }
+  .b1 { left: 18%; bottom: 22%; }
+  .b2 { left: 31%; bottom: 33%; }
+  .b3 { left: 45%; bottom: 45%; }
+  .b4 { left: 61%; bottom: 56%; }
+  .b5 { left: 77%; bottom: 67%; }
+
+  .book {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .book-side {
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+  }
+  .book-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 54px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--hairline-soft);
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .book-row:last-child { border-bottom: 0; }
+  .depth {
+    height: 6px;
+    background: #251f1c;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .depth span { display: block; height: 100%; }
+  .yes-fill { background: var(--green); }
+  .no-fill { background: var(--red); }
+
+  .chart-panel {
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+    padding: 14px;
+    min-width: 0;
+  }
+  .chart-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .chart-head strong {
+    font-weight: 500;
+  }
+  .chart-head span {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .finance-chart {
+    width: 100%;
+    height: 220px;
+    display: block;
+    background:
+      repeating-linear-gradient(to right, transparent, transparent 19.5%, var(--hairline-soft) 20%),
+      repeating-linear-gradient(to top, transparent, transparent 24.5%, var(--hairline-soft) 25%);
+  }
+  .chart-axis {
+    stroke: var(--hairline);
+    stroke-width: 1;
+  }
+  .chart-grid {
+    stroke: var(--hairline-soft);
+    stroke-width: 1;
+  }
+  .chart-line {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 2.5;
+  }
+  .chart-line.blue { stroke: var(--blue); }
+  .chart-line.red { stroke: var(--red); }
+  .chart-area {
+    fill: color-mix(in srgb, var(--green) 18%, transparent);
+  }
+  .bar-positive { fill: var(--green); }
+  .bar-negative { fill: var(--red); }
+  .bar-neutral { fill: var(--blue); opacity: .78; }
+  .candle-up { stroke: var(--green); fill: var(--green); }
+  .candle-down { stroke: var(--red); fill: var(--red); }
+  .chart-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
+    gap: 18px;
+    margin: 18px 0;
+  }
+  .toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 10;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    color: var(--ink);
+    border-radius: 4px;
+    padding: 10px 12px;
+    box-shadow: 0 14px 38px var(--shadow);
+    transform: translateY(12px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+    max-width: min(420px, calc(100vw - 36px));
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .chat-shell {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: calc(100vh - 49px);
+  }
+  .messages {
+    overflow: auto;
+    padding: 22px;
+  }
+  .message {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 760px);
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    background: var(--canvas-soft);
+    border: 1px solid var(--hairline);
+    display: grid;
+    place-items: center;
+    color: var(--body);
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .bubble {
+    color: var(--body-strong);
+    padding-top: 4px;
+  }
+  .bubble strong { color: var(--ink); font-weight: 500; }
+  .tool-run {
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin-top: 9px;
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--body);
+  }
+  .tool-run .name { color: var(--green); }
+  .composer {
+    border-top: 1px solid var(--hairline-soft);
+    padding: 14px 18px 18px;
+    background: var(--canvas);
+  }
+  .compose-box {
+    max-width: 900px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px;
+  }
+  textarea {
+    min-height: 44px;
+    resize: none;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+  }
+  .compose-tools {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+  }
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 0;
+  }
+  .chip {
+    padding: 7px 10px;
+    background: var(--canvas-soft);
+    border-color: var(--hairline);
+    color: var(--body);
+  }
+  .chip:hover { color: var(--ink); border-color: var(--body); }
+
+  .panel-stack {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--hairline);
+    background: var(--canvas-soft);
+    border-radius: 4px;
+    padding: 2px;
+  }
+  .seg button {
+    padding: 6px 10px;
+    color: var(--body);
+  }
+  .seg button.active {
+    color: var(--on-primary);
+    background: var(--primary);
+  }
+  .timeline {
+    border-left: 1px solid var(--hairline);
+    margin: 12px 0 0 7px;
+    padding-left: 16px;
+  }
+  .event {
+    position: relative;
+    padding-bottom: 15px;
+  }
+  .event:before {
+    content: "";
+    position: absolute;
+    left: -21px;
+    top: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 99px;
+    background: var(--canvas);
+    border: 1px solid var(--primary);
+  }
+  .event strong {
+    display: block;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .event span {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  @media (max-width: 1180px) {
+    .app { grid-template-columns: 76px 260px minmax(0, 1fr); }
+    .brand strong, .brand span, .nav-item span, .section-label, .status-pill { display: none; }
+    .brand { justify-content: center; padding-left: 0; padding-right: 0; }
+    .nav-item { justify-content: center; padding: 9px 0; }
+    .dashboard { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 820px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; grid-template-columns: 1fr; }
+    .nav, .rail { border-right: 0; border-bottom: 1px solid var(--hairline-soft); }
+    .nav { position: sticky; top: 0; z-index: 2; background: var(--canvas); }
+    .nav-group { display: flex; gap: 4px; overflow-x: auto; padding: 10px 0; }
+    .nav-foot { display: none; }
+    .nav-item { width: auto; justify-content: flex-start; min-width: 42px; }
+    .rail { max-height: 300px; }
+    .workspace { min-height: 720px; }
+    .grid-metrics { grid-template-columns: 1fr 1fr; }
+    .split, .book { grid-template-columns: 1fr; }
+    .chart-row { grid-template-columns: 1fr; }
+    h1 { font-size: 30px; line-height: 36px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="nav" aria-label="主导航">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <strong>aihf</strong>
+        <span>pi · polyagents</span>
+      </div>
+    </div>
+
+    <div class="nav-group" data-nav>
+      <p class="section-label">Workspace</p>
+      <button class="nav-item active" data-view="ask" title="Ask">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+        <span>Ask</span>
+      </button>
+      <button class="nav-item" data-view="markets" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-7"/></svg>
+        <span>Markets</span>
+      </button>
+      <button class="nav-item" data-view="evaluation" title="Evaluation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h18"/><path d="M12 3v18"/><circle cx="12" cy="12" r="8"/></svg>
+        <span>Evaluation</span>
+      </button>
+      <button class="nav-item" data-view="portfolio" title="Portfolio">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16v13H4z"/><path d="M8 7V5h8v2"/><path d="M8 13h8"/></svg>
+        <span>Portfolio</span>
+      </button>
+      <button class="nav-item" data-view="research" title="Research">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5z"/><path d="M8 7h6"/><path d="M8 11h8"/></svg>
+        <span>Research</span>
+      </button>
+      <button class="nav-item" data-view="tools" title="Tools">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3z"/></svg>
+        <span>Tools</span>
+      </button>
+      <button class="nav-item" data-view="runtime" title="Runtime">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+        <span>Runtime</span>
+      </button>
+      <button class="nav-item" data-view="harness" title="Harness">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg>
+        <span>Harness</span>
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <p class="section-label">System</p>
+      <button class="nav-item" data-view="automations" title="Automations">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+        <span>Automations</span>
+      </button>
+      <button class="nav-item" data-view="settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2 .1 8 8 0 0 1-1.7.7 1.7 1.7 0 0 0-1.2 1.6V23H8.8v-.3a1.7 1.7 0 0 0-1.2-1.6 8 8 0 0 1-1.7-.7 1.8 1.8 0 0 0-2-.1l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 2.1 15a8.5 8.5 0 0 1 0-2 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.8 1.8 0 0 0 2-.1 8 8 0 0 1 1.7-.7 1.7 1.7 0 0 0 1.2-1.6V5h6.4v.3a1.7 1.7 0 0 0 1.2 1.6 8 8 0 0 1 1.7.7 1.8 1.8 0 0 0 2 .1l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 8.5 8.5 0 0 1 0 2z"/></svg>
+        <span>Settings</span>
+      </button>
+    </div>
+
+    <div class="nav-foot">
+      <div class="status-pill">
+        <span>paper</span>
+        <span class="positive">live off</span>
+      </div>
+    </div>
+  </aside>
+
+  <aside class="rail">
+    <div class="rail-head">
+      <h2 id="railTitle">Ask</h2>
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="railSearch" placeholder="搜索市场、实验、工具..." />
+      </label>
+    </div>
+    <div class="rail-scroll" id="railContent"></div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div class="crumbs">
+        <span class="dot"></span>
+        <strong id="crumbTitle">Ask</strong>
+        <span id="crumbSub">timestamp-locked · paper only</span>
+      </div>
+      <div class="toolbar">
+        <button class="icon-button" id="themeBtn" title="切换 Dark / Light">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+        <button class="icon-button" id="refreshBtn" title="刷新">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v6h-6"/></svg>
+        </button>
+        <button class="action" id="snapshotBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16v13H4z"/><path d="M8 3h8l2 4H6z"/></svg>
+          Snapshot
+        </button>
+        <button class="action primary" id="runBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3v18l15-9z"/></svg>
+          Run scan
+        </button>
+      </div>
+    </header>
+
+    <section class="view active" id="view-ask">
+      <div class="chat-shell">
+        <div class="messages" id="messages">
+          <div class="message">
+            <div class="avatar">pa</div>
+            <div class="bubble">
+              <strong>Alpha Lab 已就绪。</strong><br>
+              我会按 PRD 的纪律工作: 先创建 point-in-time 快照，再输出 p_raw / p_calibrated，随后和市场价基线比较。没有校准和评估闭环的机会不会进入 paper execution。
+              <div class="tool-run"><span class="name">system.check</span> { mode: "paper", live_trading: false, point_in_time: true }</div>
+            </div>
+          </div>
+          <div class="message">
+            <div class="avatar">you</div>
+            <div class="bubble">扫描政治和宏观市场，找 p_calibrated 明显跑赢市场价的 forward-test 候选。</div>
+          </div>
+          <div class="message">
+            <div class="avatar">pa</div>
+            <div class="bubble">
+              收到。我会先做候选扫描，再对每个候选生成不可变快照，并记录未交易候选作为反事实样本。
+              <div class="tool-run"><span class="name">scan_markets</span> { category: ["politics","macro"], min_liquidity: 25000 }</div>
+              <div class="tool-run"><span class="name">forecast_market</span> { output: ["p_raw","p_calibrated","baseline_delta","ece_bucket"] }</div>
+              找到 3 个可进入 forward-test 的候选，其中 1 个满足 paper sizing 门槛。建议先查看 Markets 面板里的 “Fed cut by Sep”。
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="compose-box">
+            <textarea id="prompt" placeholder="Ask polyagents to research, evaluate, or paper-trade..."></textarea>
+            <div class="compose-tools">
+              <button class="icon-button" title="添加附件">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12.5 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.6 5.6L9.6 18.1a2 2 0 1 1-2.8-2.8l8.4-8.4"/></svg>
+              </button>
+              <button class="action primary" id="sendBtn">Send</button>
+            </div>
+          </div>
+          <div class="suggestions">
+            <button class="chip">跑一版 politics forward-test 计划</button>
+            <button class="chip">解释 Fed 市场的校准曲线</button>
+            <button class="chip">把未下单候选写入反事实日志</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-markets">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Market scanner</h1>
+              <p class="lead">候选排序使用 p_calibrated、market baseline delta、年化 edge、订单簿可成交深度和结算时间。所有快照都会锁定 prediction_time。</p>
+            </div>
+            <div class="seg" role="tablist">
+              <button class="active">Forward</button>
+              <button>Backtest</button>
+              <button>Watch</button>
+            </div>
+          </div>
+
+          <div class="grid-metrics">
+            <div class="metric">
+              <div class="k">候选市场</div>
+              <div class="v">38</div>
+              <div class="s">12 个通过 PIT 检查</div>
+            </div>
+            <div class="metric">
+              <div class="k">跑赢市场价</div>
+              <div class="v positive">7</div>
+              <div class="s">Brier delta &lt; -0.01</div>
+            </div>
+            <div class="metric">
+              <div class="k">可 paper</div>
+              <div class="v">3</div>
+              <div class="s">walk-book fill &gt; 80%</div>
+            </div>
+            <div class="metric">
+              <div class="k">平均 ECE</div>
+              <div class="v warn">0.041</div>
+              <div class="s">politics 优于 macro</div>
+            </div>
+          </div>
+
+          <div class="chart-row">
+            <div class="chart-panel">
+              <div class="chart-head"><strong>Forward-test expected value</strong><span>edge after calibration and capital lock</span></div>
+              <svg class="finance-chart" viewBox="0 0 720 220" role="img" aria-label="候选市场期望收益柱状图">
+                <line class="chart-axis" x1="38" y1="174" x2="690" y2="174"/>
+                <line class="chart-axis" x1="38" y1="26" x2="38" y2="190"/>
+                <rect class="bar-positive" x="86" y="84" width="42" height="90"/><rect class="bar-positive" x="170" y="112" width="42" height="62"/>
+                <rect class="bar-negative" x="254" y="174" width="42" height="28"/><rect class="bar-positive" x="338" y="96" width="42" height="78"/>
+                <rect class="bar-neutral" x="422" y="136" width="42" height="38"/><rect class="bar-positive" x="506" y="72" width="42" height="102"/>
+                <rect class="bar-negative" x="590" y="174" width="42" height="18"/>
+                <text x="78" y="205" fill="currentColor" class="mono" font-size="11">Fed</text><text x="157" y="205" fill="currentColor" class="mono" font-size="11">Senate</text><text x="244" y="205" fill="currentColor" class="mono" font-size="11">CPI</text><text x="329" y="205" fill="currentColor" class="mono" font-size="11">Turnout</text><text x="492" y="205" fill="currentColor" class="mono" font-size="11">EU AI</text>
+              </svg>
+            </div>
+            <div class="chart-panel">
+              <div class="chart-head"><strong>Liquidity / spread map</strong><span>walk-book executable depth</span></div>
+              <svg class="finance-chart" viewBox="0 0 360 220" role="img" aria-label="流动性和点差散点图">
+                <line class="chart-axis" x1="36" y1="184" x2="330" y2="184"/><line class="chart-axis" x1="36" y1="28" x2="36" y2="184"/>
+                <circle cx="112" cy="86" r="12" fill="var(--green)"/><circle cx="181" cy="124" r="8" fill="var(--amber)"/><circle cx="244" cy="62" r="15" fill="var(--green)"/><circle cx="278" cy="151" r="6" fill="var(--red)"/><circle cx="82" cy="142" r="7" fill="var(--blue)"/>
+                <text x="42" y="24" fill="currentColor" class="mono" font-size="11">depth</text><text x="284" y="204" fill="currentColor" class="mono" font-size="11">spread</text>
+              </svg>
+            </div>
+          </div>
+
+          <table class="market-table">
+            <thead>
+              <tr>
+                <th>Market</th>
+                <th>Category</th>
+                <th>Market</th>
+                <th>p_cal</th>
+                <th>Edge</th>
+                <th>APY gate</th>
+                <th>Decision</th>
+              </tr>
+            </thead>
+            <tbody id="marketRows">
+              <tr class="selected" data-market="Fed cut by Sep">
+                <td><div class="question">Will the Fed cut rates by September?</div><span class="muted mini">resolves in 78d · snapshot #a18f</span></td>
+                <td><span class="tag blue">macro</span></td>
+                <td class="mono">0.41</td>
+                <td class="mono">0.49</td>
+                <td class="mono positive">+8.0%</td>
+                <td><span class="tag green">pass</span></td>
+                <td><span class="tag green">paper yes</span></td>
+              </tr>
+              <tr data-market="Senate control">
+                <td><div class="question">Republicans control the Senate after 2026 election?</div><span class="muted mini">resolves in 503d · snapshot #c920</span></td>
+                <td><span class="tag blue">politics</span></td>
+                <td class="mono">0.55</td>
+                <td class="mono">0.59</td>
+                <td class="mono positive">+4.0%</td>
+                <td><span class="tag amber">capital lock</span></td>
+                <td><span class="tag">record only</span></td>
+              </tr>
+              <tr data-market="CPI under 3">
+                <td><div class="question">US CPI YoY below 3.0% in next print?</div><span class="muted mini">resolves in 24d · snapshot #d451</span></td>
+                <td><span class="tag blue">economy</span></td>
+                <td class="mono">0.62</td>
+                <td class="mono">0.60</td>
+                <td class="mono negative">-2.0%</td>
+                <td><span class="tag red">fail</span></td>
+                <td><span class="tag">counterfactual</span></td>
+              </tr>
+              <tr data-market="Election turnout">
+                <td><div class="question">US election turnout exceeds 158M voters?</div><span class="muted mini">resolves in 506d · snapshot #ee02</span></td>
+                <td><span class="tag blue">politics</span></td>
+                <td class="mono">0.28</td>
+                <td class="mono">0.36</td>
+                <td class="mono positive">+8.0%</td>
+                <td><span class="tag amber">horizon</span></td>
+                <td><span class="tag">watch</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pane compact">
+          <div class="pane-title">
+            <div>
+              <h2 id="marketTitle">Fed cut by Sep</h2>
+              <p class="muted mini">snapshot locked · 2026-06-22 08:14 PT</p>
+            </div>
+            <button class="action primary">Size</button>
+          </div>
+
+          <div class="split">
+            <div class="block">
+              <h3>Forecast</h3>
+              <div class="kv"><span>p_market</span><span>0.41</span></div>
+              <div class="kv"><span>p_raw</span><span>0.56</span></div>
+              <div class="kv"><span>p_calibrated</span><span class="positive">0.49</span></div>
+              <div class="kv"><span>baseline delta</span><span class="positive">+0.018 Brier</span></div>
+            </div>
+            <div class="block">
+              <h3>Risk gates</h3>
+              <div class="kv"><span>absolute edge</span><span class="positive">pass</span></div>
+              <div class="kv"><span>annualized edge</span><span class="positive">pass</span></div>
+              <div class="kv"><span>spread</span><span>34 bps</span></div>
+              <div class="kv"><span>UMA ambiguity</span><span class="warn">medium</span></div>
+            </div>
+          </div>
+
+          <h3>Order book walk</h3>
+          <div class="book" aria-label="订单簿深度">
+            <div class="book-side">
+              <div class="book-row"><span>YES</span><div class="depth"><span class="yes-fill" style="width:92%"></span></div><span>0.42</span></div>
+              <div class="book-row"><span>YES</span><div class="depth"><span class="yes-fill" style="width:74%"></span></div><span>0.43</span></div>
+              <div class="book-row"><span>YES</span><div class="depth"><span class="yes-fill" style="width:46%"></span></div><span>0.44</span></div>
+            </div>
+            <div class="book-side">
+              <div class="book-row"><span>NO</span><div class="depth"><span class="no-fill" style="width:82%"></span></div><span>0.59</span></div>
+              <div class="book-row"><span>NO</span><div class="depth"><span class="no-fill" style="width:61%"></span></div><span>0.60</span></div>
+              <div class="book-row"><span>NO</span><div class="depth"><span class="no-fill" style="width:32%"></span></div><span>0.61</span></div>
+            </div>
+          </div>
+
+          <div class="terminal" style="margin-top:18px">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>paper_execute preview</span></div>
+            <div class="terminal-body">
+              <span class="cmd">$ size_position --token FED-SEP-YES --p-cal 0.49</span><br>
+              bankroll: 10,000 USDC<br>
+              quarter_kelly: 1.82% capped at 1.50%<br>
+              requested: 150 USDC<br>
+              avg_fill: 0.4281 · slippage: 81 bps<br>
+              <span class="ok">decision: PAPER_FILLABLE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-evaluation">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Evaluation ledger</h1>
+              <p class="lead">评估与 L1-L4 平级。每条 forecast 都和 market-implied baseline 同时结算，按类别、持有期、模型版本和 prompt 版本分层。</p>
+            </div>
+            <button class="action">Export JSONL</button>
+          </div>
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Brier vs market</div><div class="v positive">-0.014</div><div class="s">lower is better</div></div>
+            <div class="metric"><div class="k">Log loss delta</div><div class="v positive">-0.026</div><div class="s">settled 164</div></div>
+            <div class="metric"><div class="k">ECE</div><div class="v">0.037</div><div class="s">10 bins</div></div>
+            <div class="metric"><div class="k">Sharpe paper</div><div class="v warn">1.14</div><div class="s">after slippage</div></div>
+          </div>
+
+          <div class="split">
+            <div class="block">
+              <div class="pane-title" style="margin-bottom:6px">
+                <h3>Calibration curve</h3>
+                <span class="tag green">p_cal beats raw</span>
+              </div>
+              <div class="calibration">
+                <div class="diag"></div>
+                <div class="cal-line"></div>
+                <span class="bin b1"></span><span class="bin b2"></span><span class="bin b3"></span><span class="bin b4"></span><span class="bin b5"></span>
+              </div>
+              <p class="muted mini">原始 LLM p_raw 在 70%-90% 分桶过度自信；shrinkage + category calibrator 后 ECE 从 0.081 降到 0.037。</p>
+            </div>
+            <div class="block">
+              <h3>Category split</h3>
+              <div class="kv"><span>Politics</span><span class="positive">Brier -0.021</span></div>
+              <div class="kv"><span>Macro</span><span class="positive">Brier -0.008</span></div>
+              <div class="kv"><span>Sports</span><span class="negative">Brier +0.004</span></div>
+              <div class="kv"><span>Crypto</span><span class="warn">insufficient n</span></div>
+              <div class="kv"><span>Best horizon</span><span>7-45d</span></div>
+              <div class="kv"><span>Leak checks</span><span class="positive">clean</span></div>
+            </div>
+          </div>
+
+          <table class="ledger-table">
+            <thead><tr><th>Run</th><th>Slice</th><th>p_cal</th><th>Market</th><th>Outcome</th><th>Metric</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">run_0622_0814</td><td>macro · 7-90d</td><td class="mono">0.49</td><td class="mono">0.41</td><td>pending</td><td class="mono positive">+8.0 edge</td><td><span class="tag green">forward</span></td></tr>
+              <tr><td class="mono">run_0618_1340</td><td>politics · 30d</td><td class="mono">0.63</td><td class="mono">0.58</td><td>yes</td><td class="mono positive">Brier win</td><td><span class="tag green">settled</span></td></tr>
+              <tr><td class="mono">run_0614_2201</td><td>sports · 3d</td><td class="mono">0.71</td><td class="mono">0.69</td><td>no</td><td class="mono negative">logloss miss</td><td><span class="tag amber">noisy</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pane compact">
+          <h2>Protocol</h2>
+          <p class="muted">评估系统把“有没有 edge”拆成可审计的实验协议，而不是把单笔胜负写进 prompt。</p>
+          <div class="timeline">
+            <div class="event"><strong>Snapshot locked</strong><span>market, book, news, RAG all available_at &lt; prediction_time</span></div>
+            <div class="event"><strong>Forecast recorded</strong><span>p_raw, p_calibrated, p_market, prompt_version, model_version</span></div>
+            <div class="event"><strong>Baseline paired</strong><span>market-implied probability gets identical settlement treatment</span></div>
+            <div class="event"><strong>Outcome settled</strong><span>token_id based resolution, dispute and ambiguity flags attached</span></div>
+            <div class="event"><strong>Lesson filtered</strong><span>importance weighting, forgetting, category scope, counterfactuals</span></div>
+          </div>
+          <div class="terminal" style="margin-top:18px">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>evaluation_report</span></div>
+            <div class="terminal-body">
+              <span class="cmd">$ evaluation_report --slice politics --baseline market</span><br>
+              settled: 72 · pending: 19<br>
+              brier_model: 0.182<br>
+              brier_market: 0.203<br>
+              ece_model: 0.032<br>
+              <span class="ok">verdict: EDGE_OBSERVED_FORWARD</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-portfolio">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Paper portfolio</h1>
+              <p class="lead">组合报告默认使用 walk-the-book 成交价，扣除滑点、资金锁定和结算延迟。这里没有 mid-price 幻觉。</p>
+            </div>
+            <button class="action primary">Settle</button>
+          </div>
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Equity</div><div class="v">$10,842</div><div class="s positive">+8.42% total</div></div>
+            <div class="metric"><div class="k">Cash</div><div class="v">$8,910</div><div class="s">17.8% locked</div></div>
+            <div class="metric"><div class="k">APY</div><div class="v positive">21.6%</div><div class="s">realistic fill</div></div>
+            <div class="metric"><div class="k">Avg slippage</div><div class="v warn">74 bps</div><div class="s">thin books filtered</div></div>
+          </div>
+
+          <div class="chart-row">
+            <div class="chart-panel">
+              <div class="chart-head"><strong>Paper equity curve</strong><span>realistic fills · mark-to-market</span></div>
+              <svg class="finance-chart" viewBox="0 0 720 220" role="img" aria-label="纸面组合权益曲线">
+                <path class="chart-area" d="M40 166 L110 160 L178 171 L246 141 L314 132 L382 136 L450 105 L518 96 L586 82 L680 72 L680 190 L40 190 Z"/>
+                <path class="chart-line" d="M40 166 L110 160 L178 171 L246 141 L314 132 L382 136 L450 105 L518 96 L586 82 L680 72"/>
+                <path class="chart-line red" d="M40 190 L110 190 L178 198 L246 182 L314 177 L382 181 L450 162 L518 158 L586 151 L680 145"/>
+                <line class="chart-axis" x1="40" y1="190" x2="690" y2="190"/><line class="chart-axis" x1="40" y1="28" x2="40" y2="190"/>
+                <text x="52" y="36" fill="currentColor" class="mono" font-size="11">equity</text><text x="612" y="206" fill="currentColor" class="mono" font-size="11">30d</text>
+              </svg>
+            </div>
+            <div class="chart-panel">
+              <div class="chart-head"><strong>Slippage distribution</strong><span>bps by fill</span></div>
+              <svg class="finance-chart" viewBox="0 0 360 220" role="img" aria-label="成交滑点分布">
+                <line class="chart-axis" x1="32" y1="184" x2="330" y2="184"/>
+                <rect class="bar-positive" x="56" y="122" width="26" height="62"/><rect class="bar-positive" x="96" y="88" width="26" height="96"/><rect class="bar-neutral" x="136" y="58" width="26" height="126"/><rect class="bar-neutral" x="176" y="76" width="26" height="108"/><rect class="bar-negative" x="216" y="112" width="26" height="72"/><rect class="bar-negative" x="256" y="152" width="26" height="32"/>
+                <text x="42" y="204" fill="currentColor" class="mono" font-size="11">0</text><text x="126" y="204" fill="currentColor" class="mono" font-size="11">50</text><text x="212" y="204" fill="currentColor" class="mono" font-size="11">100</text><text x="282" y="204" fill="currentColor" class="mono" font-size="11">150 bps</text>
+              </svg>
+            </div>
+          </div>
+
+          <table class="ledger-table">
+            <thead><tr><th>Position</th><th>Qty</th><th>Avg fill</th><th>Mark</th><th>Locked</th><th>APY</th><th>Risk</th></tr></thead>
+            <tbody>
+              <tr><td><div class="question">Fed cut by September · YES</div><span class="muted mini">opened from run_0622_0814</span></td><td class="mono">350</td><td class="mono">0.428</td><td class="mono">0.441</td><td>78d</td><td class="positive mono">18.2%</td><td><span class="tag amber">UMA medium</span></td></tr>
+              <tr><td><div class="question">EU AI Act fine before Q4 · NO</div><span class="muted mini">counter-news event tracked</span></td><td class="mono">210</td><td class="mono">0.612</td><td class="mono">0.635</td><td>44d</td><td class="positive mono">31.7%</td><td><span class="tag green">clean</span></td></tr>
+              <tr><td><div class="question">BTC above 120k by July · YES</div><span class="muted mini">crypto slice under review</span></td><td class="mono">90</td><td class="mono">0.188</td><td class="mono">0.161</td><td>9d</td><td class="negative mono">-42.3%</td><td><span class="tag red">uncalibrated slice</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Execution quality</h2>
+          <p class="muted">Paper fills are intentionally conservative. A result that only works at mid is rejected before it can become a false lesson.</p>
+          <div class="panel-stack">
+            <div class="terminal">
+              <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>fill audit</span></div>
+              <div class="terminal-body">
+                requested: 150.00 USDC<br>
+                filled: 150.00 USDC<br>
+                levels consumed: 3<br>
+                mid at decision: 0.4100<br>
+                avg fill: 0.4281<br>
+                <span class="bad">mid-only P&amp;L overstatement: +4.31%</span>
+              </div>
+            </div>
+            <div class="split" style="margin-bottom:0">
+              <div class="block"><h3>Drawdown</h3><div class="v negative mono">-3.8%</div><p class="mini">limit: -8%</p></div>
+              <div class="block"><h3>Exposure</h3><div class="v mono">19.4%</div><p class="mini">limit: 35%</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-research">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Research lab</h1>
+              <p class="lead">把 alpha 作为假设管理，而不是把一次 LLM 判断当成策略。每个实验都有 slice、特征、prompt、校准器和 baseline。</p>
+            </div>
+            <button class="action primary">New hypothesis</button>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>hypothesis.yaml</span></div>
+            <div class="terminal-body">
+              hypothesis: "政治类新闻事件后，LLM 更新速度快于市场"<br>
+              category: politics<br>
+              features: [orderbook_microstructure, recent_news, similar_resolved_markets]<br>
+              baseline: [market_price, no_news_llm]<br>
+              success_metric:<br>
+              &nbsp;&nbsp;- brier_delta_vs_market &lt; -0.01<br>
+              &nbsp;&nbsp;- ece &lt; 0.04<br>
+              &nbsp;&nbsp;- forward_test_apy &gt; 15%
+            </div>
+          </div>
+
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Active hypotheses</div><div class="v">6</div><div class="s">2 in forward-test</div></div>
+            <div class="metric"><div class="k">Best slice</div><div class="v">Politics</div><div class="s positive">stable edge</div></div>
+            <div class="metric"><div class="k">Weak slice</div><div class="v">Sports</div><div class="s negative">market wins</div></div>
+            <div class="metric"><div class="k">Next review</div><div class="v">30d</div><div class="s">sample target 100</div></div>
+          </div>
+
+          <table class="ledger-table">
+            <thead><tr><th>Hypothesis</th><th>Slice</th><th>Status</th><th>Brier delta</th><th>ECE</th><th>Next action</th></tr></thead>
+            <tbody>
+              <tr><td>Politics event freshness</td><td>politics · 7-45d</td><td><span class="tag green">forward</span></td><td class="positive mono">-0.021</td><td class="mono">0.032</td><td>continue</td></tr>
+              <tr><td>Macro orderbook pressure</td><td>macro · 14-90d</td><td><span class="tag amber">watch</span></td><td class="positive mono">-0.008</td><td class="mono">0.049</td><td>more samples</td></tr>
+              <tr><td>Sports injury news</td><td>sports · 1-7d</td><td><span class="tag red">reject</span></td><td class="negative mono">+0.004</td><td class="mono">0.077</td><td>stop trading</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Lesson memory</h2>
+          <p class="muted">Lessons are weighted, scoped, and allowed to expire. No single settlement result can dominate future prompts.</p>
+          <div class="timeline">
+            <div class="event"><strong>Weight 0.82 · politics</strong><span>Market underreacted to confirmed ballot access change. Applies to procedural election markets.</span></div>
+            <div class="event"><strong>Weight 0.41 · macro</strong><span>CPI preview data was already priced by book movement. Do not double-count consensus previews.</span></div>
+            <div class="event"><strong>Weight 0.18 · sports</strong><span>Single injury rumor produced noisy outcome. Decay within 14 days.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-tools">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Tools & skills</h1>
+              <p class="lead">skills + MCP 是可见能力层。这里展示 Agent 被注入了什么纪律、哪些工具可调用、权限边界在哪里。</p>
+            </div>
+            <button class="action primary" data-toast="已打开 tool manifest diff">Manifest diff</button>
+          </div>
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Skills enabled</div><div class="v">3</div><div class="s">trading / research / arb</div></div>
+            <div class="metric"><div class="k">MCP servers</div><div class="v">5</div><div class="s positive">4 healthy</div></div>
+            <div class="metric"><div class="k">Tool runs today</div><div class="v">128</div><div class="s">all audited</div></div>
+            <div class="metric"><div class="k">Live tools</div><div class="v negative">0</div><div class="s">disabled by policy</div></div>
+          </div>
+          <div class="split">
+            <div class="block">
+              <h3>Trading skills</h3>
+              <div class="kv"><span>polymarket-trading</span><span class="positive">enabled</span></div>
+              <div class="kv"><span>market-research</span><span class="positive">enabled</span></div>
+              <div class="kv"><span>cross-market-arb</span><span class="warn">paper only</span></div>
+              <div class="kv"><span>prompt discipline</span><span>v0.7.2</span></div>
+            </div>
+            <div class="block">
+              <h3>MCP servers</h3>
+              <div class="kv"><span>polyagents core</span><span class="positive">healthy</span></div>
+              <div class="kv"><span>polymarket docs</span><span class="positive">healthy</span></div>
+              <div class="kv"><span>qlib backtest</span><span class="warn">sandbox</span></div>
+              <div class="kv"><span>compliance</span><span class="positive">healthy</span></div>
+            </div>
+          </div>
+          <table class="ledger-table">
+            <thead><tr><th>Tool</th><th>Layer</th><th>Permission</th><th>Last run</th><th>Policy</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">market_snapshot</td><td>L0/L1</td><td><span class="tag green">read</span></td><td>2m ago</td><td>PIT required</td></tr>
+              <tr><td class="mono">forecast_market</td><td>L2</td><td><span class="tag green">write ledger</span></td><td>4m ago</td><td>calibration required</td></tr>
+              <tr><td class="mono">paper_execute</td><td>L3</td><td><span class="tag amber">paper</span></td><td>12m ago</td><td>walk-book only</td></tr>
+              <tr><td class="mono">live_execute</td><td>L3</td><td><span class="tag red">blocked</span></td><td>never</td><td>manual approval</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Capability graph</h2>
+          <p class="muted">Ask → pi session → skill discipline → MCP tool → polyagents layer。</p>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>tool_manifest.json</span></div>
+            <div class="terminal-body">
+              session: sess_fr_0622<br>
+              manifest_hash: 9d4b2f<br>
+              skills: [polymarket-trading, market-research]<br>
+              mcp: [polyagents, qlib_backtest, compliance]<br>
+              live_execution: <span class="bad">false</span><br>
+              <span class="ok">policy: enforce_pit_and_calibration</span>
+            </div>
+          </div>
+          <div class="timeline">
+            <div class="event"><strong>Tool injected</strong><span>manifest hash pinned to pi session</span></div>
+            <div class="event"><strong>Permission checked</strong><span>tenant, role, tool, market, mode</span></div>
+            <div class="event"><strong>Audit written</strong><span>input summary, output hash, latency, error</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-runtime">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>pi runtime</h1>
+              <p class="lead">aihf 通过 pi SDK 内嵌创建 Agent Session，掌控生命周期、工具注入、记忆、压缩、沙盒和审计。</p>
+            </div>
+            <button class="action primary" data-toast="已创建 financial-research session">Create session</button>
+          </div>
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Active sessions</div><div class="v">7</div><div class="s">3 scheduled</div></div>
+            <div class="metric"><div class="k">Context health</div><div class="v positive">92%</div><div class="s">compaction ready</div></div>
+            <div class="metric"><div class="k">Sandbox</div><div class="v">locked</div><div class="s">no live keys exposed</div></div>
+            <div class="metric"><div class="k">Audit lag</div><div class="v">34ms</div><div class="s positive">nominal</div></div>
+          </div>
+          <table class="ledger-table">
+            <thead><tr><th>Session</th><th>Agent type</th><th>Tools</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">sess_fr_0622</td><td>financial-research</td><td>28</td><td>weighted lessons</td><td><span class="tag green">running</span></td><td><button class="chip" data-toast="sess_fr_0622 已恢复到 Ask">Resume</button></td></tr>
+              <tr><td class="mono">sess_eval_0619</td><td>evaluation</td><td>14</td><td>ledger only</td><td><span class="tag green">scheduled</span></td><td><button class="chip" data-toast="已打开 evaluation session">Inspect</button></td></tr>
+              <tr><td class="mono">sess_harness_0618</td><td>coding-harness</td><td>9</td><td>no trade memory</td><td><span class="tag amber">paused</span></td><td><button class="chip" data-toast="已恢复 harness session">Resume</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Session lifecycle</h2>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>createAgentSession()</span></div>
+            <div class="terminal-body">
+              tenantId: fund-demo<br>
+              agentType: financial-research<br>
+              systemPrompt: aihf_trading_v0.7<br>
+              tools: manifest_9d4b2f<br>
+              memoryPolicy: weighted_decay<br>
+              compactionPolicy: pii_safe_summary<br>
+              sandboxPolicy: no_live_execution<br>
+              <span class="ok">session persisted</span>
+            </div>
+          </div>
+          <div class="split" style="margin-top:18px">
+            <div class="block"><h3>Memory</h3><div class="kv"><span>lesson decay</span><span>30d</span></div><div class="kv"><span>trade labels</span><span>eval only</span></div></div>
+            <div class="block"><h3>Compaction</h3><div class="kv"><span>next at</span><span>78%</span></div><div class="kv"><span>PIT context</span><span class="positive">preserved</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-harness">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Coding harness</h1>
+              <p class="lead">Codex / Claude Code / opencode / aider 是可切换 worker adapter。它们服务研究工程，不拥有交易主控权。</p>
+            </div>
+            <button class="action primary" data-toast="已创建 calibration experiment workspace">New workspace</button>
+          </div>
+          <div class="grid-metrics">
+            <div class="metric"><div class="k">Worker backend</div><div class="v">Codex</div><div class="s">adapter active</div></div>
+            <div class="metric"><div class="k">Tests</div><div class="v positive">24/24</div><div class="s">PIT leak suite included</div></div>
+            <div class="metric"><div class="k">Artifacts</div><div class="v">5</div><div class="s">report, chart, parquet</div></div>
+            <div class="metric"><div class="k">Promote</div><div class="v warn">review</div><div class="s">needs evaluation gate</div></div>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>worker run</span></div>
+            <div class="terminal-body">
+              <span class="cmd">$ run_worker_tests --selector calibration/pit</span><br>
+              test_calibrator_registry.py ........ ok<br>
+              test_snapshot_time_guard.py ....... ok<br>
+              test_no_future_settlement.py ...... ok<br>
+              artifact: reports/calibration_v3.html<br>
+              <span class="ok">promote_candidate: forward-test</span>
+            </div>
+          </div>
+          <table class="ledger-table" style="margin-top:18px">
+            <thead><tr><th>Workspace</th><th>Backend</th><th>Diff</th><th>Tests</th><th>Artifact</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">ws_cal_v3</td><td>Codex</td><td>+312 / -44</td><td class="positive">pass</td><td>calibration_report.html</td><td><span class="tag amber">review</span></td></tr>
+              <tr><td class="mono">ws_news_pit</td><td>opencode</td><td>+88 / -12</td><td class="positive">pass</td><td>leak_check.json</td><td><span class="tag green">promoted</span></td></tr>
+              <tr><td class="mono">ws_sports_slice</td><td>aider</td><td>+42 / -5</td><td class="negative">fail</td><td>stderr.log</td><td><span class="tag red">blocked</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Worker boundary</h2>
+          <p class="muted">worker 可以写代码、跑测试、生成 artifact；不能直接读取未来标签、不能交易、不能改权限。</p>
+          <div class="timeline">
+            <div class="event"><strong>Create workspace</strong><span>pinned dataset snapshot and tool policy</span></div>
+            <div class="event"><strong>Run code</strong><span>file/command tools inside sandbox</span></div>
+            <div class="event"><strong>Collect artifacts</strong><span>diff, tests, report, dataset hash</span></div>
+            <div class="event"><strong>Promote</strong><span>only after evaluation ledger accepts result</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-automations">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Automations</h1>
+              <p class="lead">7×24 主动任务由 pi session 执行，并由 aihf 审计。任务失败后可恢复，不允许绕过交易风控。</p>
+            </div>
+            <button class="action primary" data-toast="已打开新建自动化任务面板">New automation</button>
+          </div>
+          <table class="ledger-table">
+            <thead><tr><th>Task</th><th>Schedule</th><th>Session</th><th>Last result</th><th>Next run</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td>Politics forward scan</td><td class="mono">*/30m</td><td class="mono">sess_fr_0622</td><td>3 forecasts</td><td>18m</td><td><span class="tag green">running</span></td></tr>
+              <tr><td>Settlement watcher</td><td class="mono">hourly</td><td class="mono">sess_eval_0619</td><td>8 checked</td><td>42m</td><td><span class="tag green">running</span></td></tr>
+              <tr><td>ECE drift alert</td><td class="mono">daily</td><td class="mono">sess_eval_0619</td><td>clean</td><td>13h</td><td><span class="tag green">armed</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane compact">
+          <h2>Run recovery</h2>
+          <div class="terminal">
+            <div class="terminal-bar"><span class="lamp"></span><span class="lamp"></span><span class="lamp"></span><span>automation audit</span></div>
+            <div class="terminal-body">
+              run_id: auto_0622_0830<br>
+              session: sess_fr_0622<br>
+              checkpoint: after_snapshot<br>
+              retry_policy: exponential_backoff<br>
+              <span class="ok">resume_supported: true</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings">
+      <div class="dashboard">
+        <div class="pane">
+          <div class="pane-title">
+            <div>
+              <h1>Settings</h1>
+              <p class="lead">Settings 只管理配置，不承载核心工作流。能力入口在 Tools，内核运行态在 Runtime，工程执行在 Harness。</p>
+            </div>
+            <button class="action primary" data-toast="设置已保存到本地原型状态">Save changes</button>
+          </div>
+          <div class="split">
+            <div class="block">
+              <h3>Execution mode</h3>
+              <div class="kv"><span>default mode</span><span class="warn">paper</span></div>
+              <div class="kv"><span>live execution</span><span class="negative">disabled</span></div>
+              <div class="kv"><span>manual approval</span><span class="positive">required</span></div>
+            </div>
+            <div class="block">
+              <h3>Models</h3>
+              <div class="kv"><span>research agent</span><span>claude-sonnet</span></div>
+              <div class="kv"><span>coding worker</span><span>Codex</span></div>
+              <div class="kv"><span>fallback</span><span>opencode</span></div>
+            </div>
+          </div>
+          <div class="split">
+            <div class="block">
+              <h3>Keys</h3>
+              <div class="kv"><span>ANTHROPIC_API_KEY</span><span class="positive">set</span></div>
+              <div class="kv"><span>POLYMARKET_PRIVATE_KEY</span><span class="negative">not set</span></div>
+              <div class="kv"><span>MARKETLENS_API_KEY</span><span class="warn">optional</span></div>
+            </div>
+            <div class="block">
+              <h3>Policy</h3>
+              <div class="kv"><span>PIT enforcement</span><span class="positive">on</span></div>
+              <div class="kv"><span>calibration required</span><span class="positive">on</span></div>
+              <div class="kv"><span>worker live access</span><span class="negative">blocked</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="pane compact">
+          <h2>Theme</h2>
+          <p class="muted">Use the moon button in the top bar to switch Dark / Light. The setting is persisted locally.</p>
+          <button class="action" id="themeBtnSettings">Toggle theme</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const railData = {
+  ask: {
+    title: "Ask",
+    items: [
+      ["Today", "Scan politics and macro markets", "3 tool calls"],
+      ["Forward test", "Build a 30 day evaluation plan", "draft"],
+      ["Calibration", "Explain ECE movement by category", "note"],
+      ["Paper trade", "Walk the book before sizing", "guarded"]
+    ]
+  },
+  markets: {
+    title: "Markets",
+    items: [
+      ["Browse", "Most active, highest liquidity, nearing resolution", "38"],
+      ["Watchlist", "Fed cut by Sep, EU AI fine, Senate control", "6"],
+      ["Categories", "Politics, macro, crypto, sports", "4"],
+      ["Counterfactuals", "Rejected candidates kept for evaluation", "19"]
+    ]
+  },
+  evaluation: {
+    title: "Evaluation",
+    items: [
+      ["Forecast quality", "Brier, log loss, ECE, calibration curve", "164"],
+      ["Market baseline", "Pair every p_cal with market-implied price", "on"],
+      ["Forward ledger", "Append-only predictions awaiting settlement", "42"],
+      ["Leak checks", "available_at <= prediction_time", "clean"]
+    ]
+  },
+  portfolio: {
+    title: "Portfolio",
+    items: [
+      ["All paper", "10,842 USDC equity", "+8.42%"],
+      ["Open positions", "3 markets, 17.8% capital locked", "3"],
+      ["Execution audit", "slippage, depth consumed, partial fills", "74 bps"],
+      ["Settlement queue", "token_id based resolution", "8"]
+    ]
+  },
+  research: {
+    title: "Research",
+    items: [
+      ["Hypotheses", "Politics event freshness", "forward"],
+      ["Experiments", "Prompt, model, calibrator comparisons", "12"],
+      ["Feature sets", "News, RAG, book pressure, flow", "5"],
+      ["Lessons", "Weighted memory with forgetting", "23"]
+    ]
+  },
+  tools: {
+    title: "Tools",
+    items: [
+      ["Skills", "Trading discipline and workflow prompts", "3"],
+      ["MCP servers", "polyagents, docs, qlib, compliance", "5"],
+      ["Permissions", "Read, paper, live, admin boundaries", "strict"],
+      ["Tool runs", "Audited calls by pi session", "128"]
+    ]
+  },
+  runtime: {
+    title: "Runtime",
+    items: [
+      ["pi sessions", "Create, resume, stop, archive", "7"],
+      ["Tool manifests", "Pinned tools and skills per session", "9d4b2f"],
+      ["Memory", "Weighted lessons and compaction policy", "healthy"],
+      ["Sandbox", "Command, file, network boundaries", "locked"]
+    ]
+  },
+  harness: {
+    title: "Harness",
+    items: [
+      ["Worker backend", "Codex active, opencode fallback", "Codex"],
+      ["Workspaces", "Calibration, PIT, news feature labs", "3"],
+      ["Artifacts", "Diffs, tests, reports, parquet", "5"],
+      ["Promotions", "Only through evaluation ledger", "review"]
+    ]
+  },
+  automations: {
+    title: "Automations",
+    items: [
+      ["Forward scan", "Politics and macro every 30m", "running"],
+      ["Settlement watcher", "Token-id resolution checks", "hourly"],
+      ["Drift alert", "ECE, slippage, drawdown monitors", "armed"],
+      ["Recovery", "Checkpointed pi sessions", "on"]
+    ]
+  },
+  settings: {
+    title: "Settings",
+    items: [
+      ["Execution", "Paper default, live gated", "safe"],
+      ["Models", "Research model and worker backend", "set"],
+      ["Keys", "API key availability and scope", "2/4"],
+      ["Policy", "PIT, calibration, worker boundaries", "on"]
+    ]
+  }
+};
+
+const subtitles = {
+  ask: "timestamp-locked · paper only",
+  markets: "scanner · forecast · sizing",
+  evaluation: "Brier · log loss · ECE · baseline",
+  portfolio: "walk-book fills · APY · Sharpe",
+  research: "hypotheses · experiments · lessons",
+  tools: "skills · MCP · permissions",
+  runtime: "pi sessions · memory · sandbox",
+  harness: "worker adapters · tests · artifacts",
+  automations: "7×24 tasks · recovery · alerts",
+  settings: "keys · policies · theme"
+};
+
+function renderRail(view) {
+  const data = railData[view];
+  document.getElementById("railTitle").textContent = data.title;
+  document.getElementById("crumbTitle").textContent = data.title;
+  document.getElementById("crumbSub").textContent = subtitles[view];
+  document.getElementById("railContent").innerHTML = data.items.map((item, idx) => `
+    <button class="rail-card ${idx === 0 ? "active" : ""}" data-toast="已打开 ${item[0]} 详情">
+      <span class="top"><strong>${item[0]}</strong><span class="count">${item[2]}</span></span>
+      <p>${item[1]}</p>
+    </button>
+  `).join("");
+}
+
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function switchView(view) {
+  const button = document.querySelector(`[data-view="${view}"]`);
+  if (!button) return;
+  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("active", b === button));
+  document.querySelectorAll(".view").forEach(panel => panel.classList.toggle("active", panel.id === `view-${view}`));
+  renderRail(view);
+}
+
+document.querySelectorAll("[data-view]").forEach(button => {
+  button.addEventListener("click", () => {
+    switchView(button.dataset.view);
+  });
+});
+
+document.querySelectorAll("#marketRows tr").forEach(row => {
+  row.addEventListener("click", () => {
+    document.querySelectorAll("#marketRows tr").forEach(r => r.classList.remove("selected"));
+    row.classList.add("selected");
+    document.getElementById("marketTitle").textContent = row.dataset.market;
+  });
+});
+
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    const prompt = document.getElementById("prompt");
+    if (prompt && document.getElementById("view-ask").classList.contains("active")) {
+      prompt.value = chip.textContent;
+    }
+  });
+});
+
+document.getElementById("sendBtn").addEventListener("click", () => {
+  const prompt = document.getElementById("prompt");
+  const text = prompt.value.trim() || "跑一版 politics forward-test 计划";
+  const messages = document.getElementById("messages");
+  messages.insertAdjacentHTML("beforeend", `
+    <div class="message">
+      <div class="avatar">you</div>
+      <div class="bubble">${text}</div>
+    </div>
+    <div class="message">
+      <div class="avatar">pa</div>
+      <div class="bubble">
+        我会把它作为 hypothesis run 记录，并生成 timestamp-locked snapshots。满足条件的候选进入 forward ledger，未交易候选进入 counterfactuals。
+        <div class="tool-run"><span class="name">experiment_run</span> { mode: "forward", baseline: "market_price", calibration: "category_shrinkage_v2" }</div>
+      </div>
+    </div>
+  `);
+  prompt.value = "";
+  messages.scrollTop = messages.scrollHeight;
+});
+
+document.getElementById("runBtn").addEventListener("click", () => {
+  switchView("markets");
+  showToast("已打开 Market scanner，并启动候选扫描预览");
+});
+
+document.getElementById("snapshotBtn").addEventListener("click", () => {
+  const messages = document.getElementById("messages");
+  switchView("ask");
+  messages.insertAdjacentHTML("beforeend", `
+    <div class="message">
+      <div class="avatar">pa</div>
+      <div class="bubble">
+        Snapshot manifest created. 所有 source available_at 均早于 prediction_time；RAG 已启用时间过滤。
+        <div class="tool-run"><span class="name">market_snapshot</span> { snapshot_id: "snap_demo_0622", leak_check: "pass" }</div>
+      </div>
+    </div>
+  `);
+  messages.scrollTop = messages.scrollHeight;
+});
+
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  showToast("当前工作区已刷新，所有指标仍来自锁定快照");
+});
+
+function applyTheme(theme) {
+  document.body.classList.toggle("light", theme === "light");
+  localStorage.setItem("aihf-theme", theme);
+  showToast(theme === "light" ? "已切换到 Light" : "已切换到 Dark");
+}
+
+function toggleTheme() {
+  applyTheme(document.body.classList.contains("light") ? "dark" : "light");
+}
+
+document.getElementById("themeBtn").addEventListener("click", toggleTheme);
+document.getElementById("themeBtnSettings").addEventListener("click", toggleTheme);
+
+document.querySelectorAll(".seg").forEach(seg => {
+  seg.addEventListener("click", event => {
+    const target = event.target.closest("button");
+    if (!target) return;
+    seg.querySelectorAll("button").forEach(button => button.classList.toggle("active", button === target));
+    showToast(`已切换到 ${target.textContent.trim()} 视图`);
+  });
+});
+
+document.addEventListener("click", event => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.dataset.view || button.id === "sendBtn" || button.id === "runBtn" || button.id === "snapshotBtn" || button.id === "refreshBtn" || button.id === "themeBtn" || button.id === "themeBtnSettings") return;
+  if (button.closest(".seg")) return;
+  if (button.closest(".suggestions") && button.classList.contains("chip")) return;
+  const message = button.dataset.toast || `${button.textContent.trim() || button.title || "Action"} 已打开`;
+  showToast(message);
+});
+
+const savedTheme = localStorage.getItem("aihf-theme");
+if (savedTheme === "light") {
+  document.body.classList.add("light");
+}
+
+renderRail("ask");
+</script>
+</body>
+</html>

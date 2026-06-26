@@ -12,52 +12,12 @@ and index/query become no-ops returning ``[]``.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from polyagents.dataflows.types import Market
 
 _COLLECTION = "polyagents_markets"
-
-
-class _LocalTextEmbedding:
-    """Small deterministic embedding for offline tests and sandboxed runs.
-
-    Chroma's default ONNX embedding may download/write model files under the
-    user's home cache. This embedding keeps the default RAG path fully local and
-    dependency-free while preserving enough lexical semantics for retrieval.
-    """
-
-    _KEYWORDS = (
-        ("bitcoin", "btc", "crypto"),
-        ("ethereum", "eth", "crypto"),
-        ("crypto", "token", "blockchain"),
-        ("price", "market", "cap"),
-        ("rain", "weather", "storm"),
-        ("lakers", "nba", "finals", "sports"),
-        ("election", "president", "candidate"),
-        ("fed", "rate", "inflation", "macro"),
-    )
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        return [self._embed(text) for text in input]
-
-    def embed_query(self, input: list[str]) -> list[list[float]]:
-        return self(input)
-
-    def embed_documents(self, input: list[str]) -> list[list[float]]:
-        return self(input)
-
-    def name(self) -> str:
-        return "polyagents-local-text"
-
-    @classmethod
-    def _embed(cls, text: str) -> list[float]:
-        lower = text.lower()
-        vec: list[float] = []
-        for group in cls._KEYWORDS:
-            vec.append(float(sum(1 for word in group if word in lower)))
-        vec.append(float(len(lower.split())) / 20.0)
-        return vec
 
 
 class ChromaRAG:
@@ -68,6 +28,7 @@ class ChromaRAG:
         self._col = None
         self._client = client          # injectable for tests
         self._disabled = False
+        self._fallback: dict[str, dict] = {}
 
     # ----- lifecycle ---------------------------------------------------------
 
@@ -81,10 +42,7 @@ class ChromaRAG:
                     chromadb.PersistentClient(path=self.path) if self.path
                     else chromadb.EphemeralClient()
                 )
-            self._col = self._client.get_or_create_collection(
-                self._collection_name,
-                embedding_function=_LocalTextEmbedding(),
-            )
+            self._col = self._client.get_or_create_collection(self._collection_name)
         except Exception:
             self._disabled = True
             self._col = None
@@ -101,25 +59,31 @@ class ChromaRAG:
         if col is None:
             return
         doc = f"{market.question}\n{market.description}".strip()
+        metadata = {
+            "question": market.question,
+            "condition_id": market.condition_id,
+            "outcome": market.outcome,
+            "price": float(market.price),
+        }
         try:
             col.upsert(
                 ids=[market.condition_id or market.market_id],
                 documents=[doc],
-                metadatas=[{
-                    "question": market.question,
-                    "condition_id": market.condition_id,
-                    "outcome": market.outcome,
-                    "price": float(market.price),
-                }],
+                metadatas=[metadata],
             )
         except Exception:
-            pass
+            self._fallback[market.condition_id or market.market_id] = {
+                "document": doc,
+                "metadata": metadata,
+            }
 
     def annotate_outcome(self, condition_id: str, winner: str) -> None:
         """Tag a market's vector with its resolved winner (closes the RAG loop)."""
         col = self._collection()
         if col is None or not condition_id:
             return
+        if condition_id in self._fallback:
+            self._fallback[condition_id]["metadata"]["resolved_winner"] = winner
         try:
             col.update(ids=[condition_id], metadatas=[{"resolved_winner": winner}])
         except Exception:
@@ -131,10 +95,12 @@ class ChromaRAG:
         col = self._collection()
         if col is None or not text:
             return []
+        if self._fallback:
+            return self._query_fallback(text, n=n, exclude_id=exclude_id)
         try:
             res = col.query(query_texts=[text], n_results=n + (1 if exclude_id else 0))
         except Exception:
-            return []
+            return self._query_fallback(text, n=n, exclude_id=exclude_id)
         ids = (res.get("ids") or [[]])[0]
         docs = (res.get("documents") or [[]])[0]
         metas = (res.get("metadatas") or [[]])[0]
@@ -149,7 +115,38 @@ class ChromaRAG:
 
     def count(self) -> int:
         col = self._collection()
+        if self._fallback:
+            return len(self._fallback)
         try:
             return col.count() if col is not None else 0
         except Exception:
             return 0
+
+    def _query_fallback(self, text: str, n: int = 3, exclude_id: str | None = None) -> list[dict]:
+        query = _tokens(text)
+        scored = []
+        for item_id, item in self._fallback.items():
+            if exclude_id and item_id == exclude_id:
+                continue
+            doc_tokens = _tokens(item["document"])
+            overlap = len(query & doc_tokens)
+            if overlap:
+                scored.append((overlap, item_id, item))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return [
+            {"id": item_id, "document": item["document"], "metadata": dict(item["metadata"])}
+            for _, item_id, item in scored[:n]
+        ]
+
+
+def _tokens(text: str) -> set[str]:
+    tokens = {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 2}
+    if "btc" in tokens:
+        tokens.add("bitcoin")
+    if "bitcoin" in tokens:
+        tokens.add("btc")
+    if "eth" in tokens:
+        tokens.add("ethereum")
+    if "ethereum" in tokens:
+        tokens.add("eth")
+    return tokens

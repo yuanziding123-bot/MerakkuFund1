@@ -19,9 +19,7 @@ def test_skills_registry_lists_skill_folders():
 
     skills = list_skills()
     ids = {s["id"] for s in skills}
-    assert {"polymarket-trading", "market-research", "cross-market-arb",
-            "market-data", "backtest", "execution-model", "risk-analysis",
-            "report-generation", "memory"} <= ids
+    assert {"polymarket-trading", "market-research", "cross-market-arb"} <= ids
     pt = next(s for s in skills if s["id"] == "polymarket-trading")
     assert pt["name"] and pt["description"] and pt["body"]
 

@@ -1,4 +1,4 @@
-"""Runtime mode and permission helpers."""
+"""Runtime: the thin mode-scoped session layer."""
 from __future__ import annotations
 
 from .session import AgentSession, PermissionDenied, PermissionPolicy

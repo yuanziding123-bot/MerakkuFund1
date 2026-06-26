@@ -43,13 +43,9 @@ workflow (referencing the MCP tools by name), and the discipline/guardrails.
    how to compose those tools.
 3. That's it — the host picks it up. No change to Alpha DevBox.
 
-Vibe-Trading-derived skills now included as MerakkuFund-native workflows:
-`market-data`, `backtest`, `execution-model`, `risk-analysis`,
-`report-generation`, and `memory`. These reuse the existing polyagents MCP
-tools instead of copying Vibe-Trading's broader cross-market runtime.
-
 Ideas for next skills (same pattern): `mean-reversion`, `event-driven` (news +
-sentiment), `portfolio-review`, `market-research` (RAG-heavy).
+sentiment), `portfolio-review`, `backtest` (over the SQLite history),
+`market-research` (RAG-heavy).
 
 ## Running the MCP server
 

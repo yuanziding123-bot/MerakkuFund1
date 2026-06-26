@@ -116,6 +116,37 @@ class PolymarketDataClient:
             offset += GAMMA_PAGE
         return out
 
+    def list_resolved_markets(self, limit: int = 200) -> list[dict]:
+        """Page CLOSED (resolved) markets ordered by 24h volume — for backtests.
+
+        Resolved markets carry their final ``outcomePrices`` (1.0 / 0.0), i.e. the
+        realised outcome, so a historical replay knows who won.
+        """
+        out: list[dict] = []
+        offset = 0
+        while len(out) < limit:
+            params = {
+                "closed": "true",
+                "archived": "false",
+                "limit": min(GAMMA_PAGE, limit - len(out)),
+                "offset": offset,
+                "order": "volume24hr",
+                "ascending": "false",
+            }
+            try:
+                r = self._http.get(f"{self.gamma_base}/markets", params=params)
+                r.raise_for_status()
+                page = r.json() or []
+            except Exception:
+                break
+            if not page:
+                break
+            out.extend(page)
+            if len(page) < GAMMA_PAGE:
+                break
+            offset += GAMMA_PAGE
+        return out
+
     def fetch_market_by_condition(self, condition_id: str) -> dict | None:
         """Fetch one market by condition id — for settlement.
 

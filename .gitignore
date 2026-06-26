@@ -13,9 +13,17 @@ env/
 # Secrets / local config
 .env
 
+# Local runtime / deployment scratch
+.local/
+*.log
+*.tar
+*.tgz
+*.zip
+
 # Local planning / strategy docs — keep private, do not publish
 Merakku-AI-Hedge-Fund-*.md
 *方案*.md
+!docs/**/*.md
 
 # OS / editor
 .DS_Store

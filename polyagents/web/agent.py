@@ -26,10 +26,60 @@ _SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 # expose an identical surface (one source of truth). The crypto / polydata /
 # compliance tools are bound too, so the cross-market-arb, research and
 # risk-check skills work in chat.
+def run_trading_strategy(token_id: str = "", strategy: str = "full") -> str:
+    """Run the multi-agent strategy loop on one Polymarket market and return the
+    agent-loop trace plus the sized decision.
+
+    A supervisor (the main agent) dispatches specialist sub-agents in sequence:
+    DataAgent (Layer-1 data) -> SignalAgent (probability read, LLM) -> RiskAgent
+    (calibration + Kelly + risk gates). Use this when the user wants to "run the
+    strategy / agents" on a market end-to-end, not just one step.
+
+    token_id: a market side's token id from scan_markets (empty = most active market).
+    strategy: 'research' (data only), 'signal' (data+signal), or 'full' (data+signal+risk).
+    """
+    from polyagents.orchestration import run_strategy
+
+    eng = mcp_server.engine()
+    market = mcp_server._get_market(token_id) if token_id else eng.most_active_market()
+    if market is None:
+        return f"No market found for token_id={token_id!r}."
+    bb = run_strategy(market, graph=eng, config=eng.config, strategy=strategy)
+    lines = [bb.summary()]
+    if bb.risk:
+        lines.append(f"\nDecision: {bb.risk['action'].upper()} "
+                     f"(edge {bb.risk['edge']:+.1%}, APY {bb.risk['apy']:+.0%}, "
+                     f"size ${bb.risk['size_usdc']:,.0f})")
+    return "\n".join(lines)
+
+
+def propose_hypothesis(statement: str, category: str = "", feature_set: str = "",
+                       success_criteria: str = "") -> str:
+    """Surface a testable idea as a Hypothesis the user can Promote to Lab (gate 1).
+
+    READ-ONLY: this only *proposes* — it does NOT create the object. Call it when
+    the user has an idea worth validating (e.g. "crypto news updates the LLM's
+    probability faster than the market"). The UI renders the proposal as a card
+    with a Promote button; promoting (an explicit user click) is what creates the
+    Hypothesis and moves it into Lab. Never trade.
+
+    statement: the hypothesis in one sentence.
+    category: the market slice it applies to (crypto / politics / macro / …).
+    feature_set: comma-separated features it would use (e.g. "news_event, rag_similar").
+    success_criteria: what would confirm it (e.g. "brier_delta < -0.01, ece < 0.04, n >= 30").
+    """
+    return (f"Proposed a Hypothesis for the user to review and Promote:\n"
+            f"- statement: {statement}\n- category: {category or 'n/a'}\n"
+            f"- features: {feature_set or 'n/a'}\n- success: {success_criteria or 'n/a'}\n"
+            "(Shown as a card — the user decides whether to Promote it to Lab.)")
+
+
 _TOOL_FUNCS = [
     mcp_server.scan_markets,
     mcp_server.market_snapshot,
     mcp_server.find_similar_markets,
+    propose_hypothesis,
+    run_trading_strategy,
     mcp_server.size_position,
     mcp_server.paper_execute,
     mcp_server.portfolio_status,
@@ -48,8 +98,17 @@ _TOOL_FUNCS = [
 ]
 
 
-def build_tools() -> list:
-    return [StructuredTool.from_function(fn) for fn in _TOOL_FUNCS]
+# Tools that have a side effect (size/execute/settle/run a strategy). The Ask
+# mode is READ-ONLY per the v0.2 PRD (§二 / §八-B ToolManifest): these must NOT
+# be injected, so a chat in Ask can never place a trade or mutate the portfolio.
+WRITE_TOOLS = {"run_trading_strategy", "size_position", "paper_execute", "settle_markets"}
+
+
+def build_tools(readonly: bool = False) -> list:
+    """The chat tool surface. ``readonly=True`` (Ask mode) drops the write tools
+    in :data:`WRITE_TOOLS`, leaving only scan / snapshot / data / evaluate reads."""
+    funcs = [f for f in _TOOL_FUNCS if not (readonly and f.__name__ in WRITE_TOOLS)]
+    return [StructuredTool.from_function(fn) for fn in funcs]
 
 
 # ----- skills registry -------------------------------------------------------
@@ -86,9 +145,9 @@ def list_mcp_servers() -> list[dict]:
     return out
 
 
-def _parse_skill(text: str) -> tuple[str, str, str]:
-    """Return (name, description, body) from a SKILL.md (--- frontmatter ---)."""
-    name = desc = ""
+def _parse_skill(text: str) -> tuple[str, str, str, str]:
+    """Return (name, description, category, body) from a SKILL.md frontmatter."""
+    name = desc = category = ""
     body = text
     if text.startswith("---"):
         parts = text.split("---", 2)
@@ -99,11 +158,13 @@ def _parse_skill(text: str) -> tuple[str, str, str]:
                     name = line.split(":", 1)[1].strip()
                 elif line.lower().startswith("description:"):
                     desc = line.split(":", 1)[1].strip()
-    return name, desc, body.strip()
+                elif line.lower().startswith("category:"):
+                    category = line.split(":", 1)[1].strip()
+    return name, desc, category, body.strip()
 
 
 def list_skills() -> list[dict]:
-    """All registered skills: id (folder), name, description, body."""
+    """All registered skills: id (folder), name, description, category, body."""
     out: list[dict] = []
     if not _SKILLS_DIR.exists():
         return out
@@ -112,10 +173,11 @@ def list_skills() -> list[dict]:
         if not f.exists():
             continue
         try:
-            name, desc, body = _parse_skill(f.read_text(encoding="utf-8"))
+            name, desc, category, body = _parse_skill(f.read_text(encoding="utf-8"))
         except OSError:
             continue
-        out.append({"id": d.name, "name": name or d.name, "description": desc, "body": body})
+        out.append({"id": d.name, "name": name or d.name, "description": desc,
+                    "category": category or "General", "body": body})
     return out
 
 
@@ -135,15 +197,51 @@ def _compose_prompt(selected_ids: list[str] | None) -> str:
 
 # ----- agent -----------------------------------------------------------------
 
-def build_agent(selected_ids: list[str] | None = None, llm=None):
-    """Compile the ReAct agent (Claude + tools + selected skills' prompt)."""
+# Models the Ask composer's selector offers. Keys are what the UI sends; values
+# are the real Anthropic model ids. The default falls back to the config model.
+ASK_MODELS: dict[str, str] = {
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+    "claude-opus-4-8": "claude-opus-4-8",
+    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+}
+
+
+def resolve_model(name: str | None) -> str:
+    """Validate a requested model against the allow-list; fall back to default."""
+    if name and name in ASK_MODELS:
+        return ASK_MODELS[name]
+    return DEFAULT_CONFIG["anthropic_model"]
+
+
+def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | None = None,
+                readonly: bool = True):
+    """Compile the ReAct agent (Claude + tools + selected skills' prompt).
+
+    ``model`` (from the Ask composer's selector) is validated against
+    :data:`ASK_MODELS`; an unknown / missing value uses the configured default.
+    ``readonly`` defaults to True — the web chat IS the Ask mode, so it gets the
+    read-only tool subset (no trading / portfolio mutation).
+    """
     from langgraph.prebuilt import create_react_agent
 
     if llm is None:
         from langchain_anthropic import ChatAnthropic
 
         llm = ChatAnthropic(
-            model=DEFAULT_CONFIG["anthropic_model"],
+            model=resolve_model(model),
             temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0),
         )
-    return create_react_agent(llm, build_tools(), prompt=_compose_prompt(selected_ids))
+    prompt = _compose_prompt(selected_ids)
+    if readonly:
+        prompt = _ASK_PREAMBLE + "\n\n" + prompt
+    return create_react_agent(llm, build_tools(readonly=readonly), prompt=prompt)
+
+
+_ASK_PREAMBLE = (
+    "You are in ASK mode: read-only. You scan, explain, compare and evaluate — you "
+    "NEVER place trades or change the portfolio (those tools are not available here). "
+    "When the user has an idea worth testing, call `propose_hypothesis` to surface it "
+    "as a Hypothesis card the user can Promote to Lab — do not pretend to have created "
+    "or backtested it yourself. Ground claims in tool results; cite sample size and "
+    "confidence intervals when you report evaluation numbers."
+)

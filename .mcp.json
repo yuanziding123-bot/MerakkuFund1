@@ -1,4 +1,4 @@
-{
+﻿{
   "mcpServers": {
     "polymarket-docs": {
       "type": "http",
@@ -7,27 +7,27 @@
     "polyagents": {
       "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
       "args": ["-m", "polyagents.mcp_server"],
-      "env": { "PYTHONPATH": "C:\\polyagents" }
+      "env": { "PYTHONPATH": "C:\\MerakkuFund" }
     },
     "crypto": {
       "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
       "args": ["-m", "polyagents.mcp_servers.crypto"],
-      "env": { "PYTHONPATH": "C:\\polyagents" }
+      "env": { "PYTHONPATH": "C:\\MerakkuFund" }
     },
     "polydata": {
       "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
       "args": ["-m", "polyagents.mcp_servers.polydata"],
-      "env": { "PYTHONPATH": "C:\\polyagents" }
+      "env": { "PYTHONPATH": "C:\\MerakkuFund" }
     },
     "compliance": {
       "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
       "args": ["-m", "polyagents.mcp_servers.compliance"],
-      "env": { "PYTHONPATH": "C:\\polyagents" }
+      "env": { "PYTHONPATH": "C:\\MerakkuFund" }
     },
     "qlib-backtest": {
       "command": "C:\\qlib\\.venv\\Scripts\\python.exe",
       "args": ["-m", "polyagents.mcp_servers.qlib_backtest"],
-      "env": { "PYTHONPATH": "C:\\polyagents" }
+      "env": { "PYTHONPATH": "C:\\MerakkuFund" }
     }
   }
 }
