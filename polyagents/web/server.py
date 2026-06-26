@@ -30,6 +30,8 @@ from fastapi.staticfiles import StaticFiles
 from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
 
+from polyagents.runtime.session import AgentSession
+
 from .agent import build_agent, list_mcp_servers, list_skills
 from .uploads import UploadCache, build_message_content, extract, public_view
 
@@ -193,6 +195,7 @@ async def strategy(request: Request) -> StreamingResponse:
 # ----- objects (the 5 financial objects + 3-gate state machine) -------------
 
 _OBJECT_STORE = None
+_AUDIT_STORE = None
 
 
 def _object_store():
@@ -204,6 +207,26 @@ def _object_store():
                 else Path.home() / ".polyagents" / "objects.db")
         _OBJECT_STORE = ObjectStore(path)
     return _OBJECT_STORE
+
+
+def _audit():
+    global _AUDIT_STORE
+    if _AUDIT_STORE is None:
+        from polyagents.storage.audit_store import AuditStore
+        db = DEFAULT_CONFIG.get("db_path")
+        path = (Path(db).with_name("audit.db") if db
+                else Path.home() / ".polyagents" / "audit.db")
+        _AUDIT_STORE = AuditStore(path)
+    return _AUDIT_STORE
+
+
+@app.get("/api/audit")
+async def audit(limit: int = 80, session: str = "") -> JSONResponse:
+    try:
+        return JSONResponse({"events": _audit().recent(limit=limit, session_id=session or None),
+                             "total": _audit().count()})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)})
 
 
 _COMMON_FIELDS = {"id", "type", "version", "state", "owner", "snapshot_id",
@@ -260,6 +283,8 @@ async def create_object(request: Request) -> JSONResponse:
                  prompt_version=body.get("prompt_version", ""),
                  model_version=DEFAULT_CONFIG.get("anthropic_model", ""))
         _object_store().save(h)
+        _audit().log("web:objects", "object.create",
+                     {"id": h.id, "type": h.type, "gate": "ask->hypothesis"}, mode="ask")
         return JSONResponse(_object_view(h))
     except Exception as exc:
         return JSONResponse({"error": str(exc)})
@@ -343,6 +368,9 @@ async def promote_object(request: Request) -> JSONResponse:
             return JSONResponse({"error": f"illegal transition: {exc}"}, status_code=400)
         except KeyError:
             return JSONResponse({"error": f"object {oid!r} not found"}, status_code=404)
+        _audit().log("web:objects", "promotion",
+                     {"object_id": oid, "to_state": to_state,
+                      "by": body.get("by", "user:web")}, mode="lab")
         return JSONResponse(_object_view(moved))
     except Exception as exc:
         return JSONResponse({"error": str(exc)})
@@ -386,9 +414,15 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
 
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
                   attachments: list[str] | None = None) -> AsyncIterator[str]:
+    # The web chat IS the Ask mode: one session decides tools (read-only),
+    # permissions and audit. mode → readonly tool subset + audit trail (§八-B/§九).
+    session = AgentSession("ask", audit=_audit())
+    session.log("session.start", model=model, skills=skills,
+                attachments=len(attachments or []))
     try:
-        agent = build_agent(skills or None, model=model)
+        agent = build_agent(skills or None, model=model, readonly=session.readonly)
     except Exception as exc:
+        session.log("session.error", message=str(exc))
         yield _sse({"type": "error", "message": f"agent init failed: {exc}"})
         return
     messages = _to_lc_messages(history)
@@ -404,11 +438,14 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
                 if text:
                     yield _sse({"type": "token", "text": text})
             elif kind == "on_tool_start":
+                session.log("tool.call", name=ev.get("name"))
                 yield _sse({"type": "tool", "name": ev.get("name"), "args": ev["data"].get("input")})
             elif kind == "on_tool_end":
                 yield _sse({"type": "tool_result", "name": ev.get("name")})
+        session.log("session.end")
         yield _sse({"type": "done"})
     except Exception as exc:
+        session.log("session.error", message=str(exc))
         yield _sse({"type": "error", "message": str(exc)})
 
 

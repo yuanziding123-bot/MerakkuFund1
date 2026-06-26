@@ -332,6 +332,12 @@
   .lg-row .mono{font-family:ui-monospace,monospace;color:var(--text)}
   .evalbox{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:16px;
        font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);white-space:pre-wrap;overflow-x:auto}
+  .aud{display:flex;align-items:center;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:12px}
+  .aud:last-child{border-bottom:0}
+  .aud-t{color:var(--muted);flex:0 0 58px}
+  .aud-m{flex:0 0 34px;color:var(--accent2);font-size:11px}
+  .aud-e{flex:0 0 110px;color:var(--text)}
+  .aud-x{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* ── Ask hero (empty state) ───────────────────────────────── */
   .empty{margin-top:14vh}
   .hero-h{font-size:32px;line-height:1.2;font-weight:700;letter-spacing:-.5px;margin:0 0 12px;color:var(--text)}
@@ -665,6 +671,8 @@
         </div>
         <div class="label" style="margin-top:18px">Connected MCP servers</div>
         <div id="mcp"></div>
+        <div class="label" style="margin-top:18px">Audit trail <span class="manage" onclick="loadAudit()">refresh</span></div>
+        <div id="auditList"><div class="hist">每个 session / 工具调用 / 晋升都落 audit_events 表。</div></div>
       </div>
 
       <div id="evalView">
@@ -1047,7 +1055,7 @@ function showView(v){
   if(marketTimer){ clearInterval(marketTimer); marketTimer=null; }
   if(v==='markets'){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }
   if(v==='objects'){ loadObjects(); }
-  if(v==='live'){ loadMcp(); }
+  if(v==='live'){ loadMcp(); loadAudit(); }
   if(labOn){ loadLabHypos(); }
   if(labOn && labSub==='strategy'){ loadStrategyMarkets(); }
 }
@@ -1486,6 +1494,27 @@ async function loadMcp(){
         <div class="mcptools">${s.tools.map(esc).join(' · ')}</div>
       </div>`).join('');
   }catch(e){ el.innerHTML = '<div class="hist">MCP list unavailable</div>'; }
+}
+async function loadAudit(){
+  const el = document.getElementById('auditList'); if(!el) return;
+  try{
+    const r = await (await fetch('/api/audit?limit=40')).json();
+    const ev = r.events||[];
+    if(!ev.length){ el.innerHTML = '<div class="hist">尚无审计事件。</div>'; return; }
+    el.innerHTML = `<div class="hist" style="padding:2px 4px 8px">${r.total} events total · newest first</div>`+
+      ev.map(e=>{
+        const t = (e.ts||'').slice(11,19);
+        const p = e.payload||{};
+        const extra = e.event_type==='tool.call' ? (p.name||'') :
+          (e.event_type==='promotion' ? (p.object_id+'→'+p.to_state) :
+          (e.event_type==='object.create' ? (p.id+' '+(p.gate||'')) :
+          (p.model? 'model '+p.model : '')));
+        return `<div class="aud"><span class="aud-t mono">${esc(t)}</span>
+          <span class="aud-m">${esc(e.mode||'')}</span>
+          <span class="aud-e mono">${esc(e.event_type)}</span>
+          <span class="aud-x">${esc(extra)}</span></div>`;
+      }).join('');
+  }catch(e){ el.innerHTML = '<div class="hist">audit unavailable</div>'; }
 }
 
 loadSkills(); loadMcp(); loadPortfolio(); loadObjects(); renderConvs(); showView('ask');
