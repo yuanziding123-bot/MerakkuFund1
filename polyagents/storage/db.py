@@ -191,6 +191,30 @@ class DataStore:
         )
         self.conn.commit()
 
+    def fetch_collections(self, min_as_of: str | None = None, max_as_of: str | None = None,
+                          limit: int = 500) -> list[dict]:
+        """Return stored collection runs for research/backtest consumers."""
+        q = "SELECT token_id, as_of, question, market_price, raw FROM collections WHERE 1=1"
+        args: list[Any] = []
+        if min_as_of is not None:
+            q += " AND as_of>=?"
+            args.append(min_as_of)
+        if max_as_of is not None:
+            q += " AND as_of<=?"
+            args.append(max_as_of)
+        q += " ORDER BY as_of LIMIT ?"
+        args.append(limit)
+        rows = []
+        for r in self.conn.execute(q, args).fetchall():
+            rows.append({
+                "token_id": r["token_id"],
+                "as_of": r["as_of"],
+                "question": r["question"],
+                "market_price": r["market_price"],
+                "raw": json.loads(r["raw"] or "{}"),
+            })
+        return rows
+
     # ----- introspection -----------------------------------------------------
 
     def counts(self) -> dict[str, int]:

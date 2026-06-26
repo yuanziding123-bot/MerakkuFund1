@@ -1,0 +1,110 @@
+"""Tests for the Lab SQLite repository."""
+from __future__ import annotations
+
+from polyagents.lab.backtest import BacktestRunner
+from polyagents.lab.repository import LabRepository
+from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
+from polyagents.lab.service import create_hypothesis, get_hypothesis, list_hypotheses
+from polyagents.storage.db import DataStore
+
+
+def _request() -> CreateHypothesisRequest:
+    return CreateHypothesisRequest(
+        statement="Crypto news markets update slower than the model",
+        category_filter="crypto",
+        feature_set=["news_sentiment"],
+        prompt_version="signal-v1",
+        model_version="claude-sonnet-4",
+        lineage={"source": "manual", "parents": []},
+    )
+
+
+def _backtest_request(hypothesis_id: str) -> BacktestRequest:
+    return BacktestRequest(
+        hypothesis_id=hypothesis_id,
+        time_window={
+            "start": "2026-03-01T00:00:00Z",
+            "end": "2026-06-01T00:00:00Z",
+        },
+        market_filter={"category": "crypto", "settled_only": True},
+        model_version="claude-sonnet-4",
+        prompt_version="signal-v1",
+        calibrator_id="shrink-to-market-v1",
+    )
+
+
+def test_repository_persists_hypotheses(tmp_path):
+    repo = LabRepository(tmp_path / "lab.db")
+    created = create_hypothesis(_request(), repo=repo)
+
+    assert repo.counts()["objects"] == 1
+    assert list_hypotheses(repo=repo)[0]["id"] == created.id
+    assert get_hypothesis(created.id, repo=repo).statement.startswith("Crypto news")
+    repo.close()
+
+
+def test_backtest_runner_persists_evidence(tmp_path):
+    repo = LabRepository(tmp_path / "lab.db")
+    created = create_hypothesis(_request(), repo=repo)
+
+    result = BacktestRunner(repo=repo).run(_backtest_request(created.id))
+
+    counts = repo.counts()
+    assert counts["forecasts"] == result.forecast_count
+    assert counts["evaluations"] == 1
+    assert counts["backtest_runs"] == 1
+    assert repo.get_backtest_run(result.id).report_id == result.report_id
+    assert repo.get_report(result.report_id)["metrics"]["n"] == result.forecast_count
+    repo.close()
+
+
+def test_backtest_runner_uses_stored_collections(tmp_path):
+    repo = LabRepository(tmp_path / "lab.db")
+    store = DataStore(tmp_path / "data.db")
+    created = create_hypothesis(_request(), repo=repo)
+    store.record_collection(
+        "token_yes_crypto_1",
+        "2026-04-01T00:00:00Z",
+        "Will bitcoin close above 100k?",
+        0.55,
+        {
+            "features": {
+                "factors": {
+                    "sentiment": 0.4,
+                    "flow_imbalance": 0.2,
+                    "book_pressure": 0.1,
+                    "spread_bps": 50,
+                    "price_momentum": 0.05,
+                }
+            },
+            "lab": {"outcome": 1, "available_at_max": "2026-04-01T00:00:00Z"},
+        },
+    )
+    store.record_collection(
+        "token_yes_crypto_2",
+        "2026-04-02T00:00:00Z",
+        "Will ethereum close above 5k?",
+        0.45,
+        {
+            "features": {
+                "factors": {
+                    "sentiment": -0.4,
+                    "flow_imbalance": -0.2,
+                    "book_pressure": -0.1,
+                    "spread_bps": 60,
+                    "price_momentum": -0.05,
+                }
+            },
+            "lab": {"outcome": 0, "available_at_max": "2026-04-02T00:00:00Z"},
+        },
+    )
+
+    result = BacktestRunner(store=store, repo=repo).run(_backtest_request(created.id))
+
+    forecasts = repo.forecasts_for_hypothesis(created.id)
+    assert result.forecast_count == 2
+    assert {f["market_token_id"] for f in forecasts} == {"token_yes_crypto_1", "token_yes_crypto_2"}
+    assert forecasts[0]["p_cal"] != forecasts[0]["p_market"]
+    assert repo.get_report(result.report_id)["metrics"]["n"] == 2
+    store.close()
+    repo.close()
