@@ -37,8 +37,23 @@ from polyagents.lab.service import create_hypothesis, default_repository, get_hy
 
 from polyagents.runtime.session import AgentSession
 
-from .agent import build_agent, list_mcp_servers, list_skills
+from .agent import build_agent, build_general_agent, list_mcp_servers, list_skills
+from .router import classify
 from .uploads import UploadCache, build_message_content, extract, public_view
+
+_CLASSIFIER_LLM = None
+
+
+def _classifier_llm():
+    """Cheap Haiku classifier for ambiguous questions (built once, lazily)."""
+    global _CLASSIFIER_LLM
+    if _CLASSIFIER_LLM is None:
+        try:
+            from langchain_anthropic import ChatAnthropic
+            _CLASSIFIER_LLM = ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0.0)
+        except Exception:
+            _CLASSIFIER_LLM = False        # unavailable → classify falls back to 'domain'
+    return _CLASSIFIER_LLM or None
 
 _REPO = str(Path(__file__).resolve().parents[2])
 
@@ -502,14 +517,25 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
 
 
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
-                  attachments: list[str] | None = None) -> AsyncIterator[str]:
+                  attachments: list[str] | None = None,
+                  mode: str = "auto") -> AsyncIterator[str]:
     # The web chat IS the Ask mode: one session decides tools (read-only),
     # permissions and audit. mode → readonly tool subset + audit trail (§八-B/§九).
     session = AgentSession("ask", audit=_audit())
+    # route the question to a Domain (tools) or General (web_search) handler
+    last_text = next((str(m.get("content", "")) for m in reversed(history)
+                      if m.get("role") == "user"), "")
+    route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
+                         llm=_classifier_llm())
     session.log("session.start", model=model, skills=skills,
                 attachments=len(attachments or []))
+    session.log("route.decided", route=route, by=by)
+    yield _sse({"type": "route", "route": route, "by": by})
     try:
-        agent = build_agent(skills or None, model=model, readonly=session.readonly)
+        if route == "general":
+            agent = build_general_agent(model=model)
+        else:
+            agent = build_agent(skills or None, model=model, readonly=session.readonly)
     except Exception as exc:
         session.log("session.error", message=str(exc))
         yield _sse({"type": "error", "message": f"agent init failed: {exc}"})
@@ -545,5 +571,6 @@ async def chat(request: Request) -> StreamingResponse:
     skills = body.get("skills", [])
     model = body.get("model")
     attachments = body.get("attachments", [])
-    return StreamingResponse(_stream(history, skills, model, attachments),
+    mode = body.get("mode", "auto")
+    return StreamingResponse(_stream(history, skills, model, attachments, mode),
                              media_type="text/event-stream")

@@ -397,7 +397,9 @@
   .cpop{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:12px;
        box-shadow:0 16px 48px rgba(0,0,0,.6);padding:6px;z-index:40;display:none;min-width:212px}
   .cpop.open{display:block}
-  #plusMenu{left:0;bottom:58px} #modelMenu{left:96px;bottom:58px;min-width:240px}
+  #plusMenu{left:0;bottom:58px} #modeMenu{left:50px;bottom:58px;min-width:230px} #modelMenu{left:150px;bottom:58px;min-width:240px}
+  .route-badge{display:inline-block;margin-bottom:5px;font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
+  .route-badge.general{color:var(--accent2);border-color:#2c4a7a}
   #skillsFly{left:222px;bottom:58px;min-width:300px;max-height:300px;overflow-y:auto}
   .cmi{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;width:100%;text-align:left;font-size:13px;color:var(--text)}
   .cmi:hover{background:var(--panel2)} .cmi.disabled{opacity:.5;cursor:default} .cmi.disabled:hover{background:transparent}
@@ -592,7 +594,7 @@
           <div id="dropHint" class="drop-hint">松开以添加文件</div>
           <div class="ctoolbar">
             <button class="cplus" id="plusBtn" title="Add" onclick="toggleCMenu(event,'plusMenu')">＋</button>
-            <button class="ctbtn" title="模式(Ask 只读)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>Chat</button>
+            <button class="ctbtn" id="modeBtn" title="回答模式(Ask 只读)" onclick="toggleCMenu(event,'modeMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span id="modeLbl">Auto</span><span class="cv">▾</span></button>
             <button class="ctbtn" id="modelBtn" title="模型" onclick="toggleCMenu(event,'modelMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span id="modelLbl">Sonnet 4.6</span><span class="cv">▾</span></button>
             <span class="cspacer"></span>
             <button class="cicon" title="附件" onclick="document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17a1.5 1.5 0 0 1-2-2l8-8"/></svg></button>
@@ -605,6 +607,11 @@
             <button class="cmi disabled" title="二期"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Projects<span class="csoon">soon</span></button>
           </div>
           <div class="cpop" id="skillsFly"></div>
+          <div class="cpop" id="modeMenu">
+            <button class="cmrow" onclick="pickMode('auto','Auto',this)">Auto<small>自动分类(规则+Haiku)</small><span class="ctick">✓</span></button>
+            <button class="cmrow" onclick="pickMode('domain','Domain',this)">Domain<small>市场/数据/评估(领域工具)</small></button>
+            <button class="cmrow" onclick="pickMode('general','General',this)">General<small>泛问题/编码/web 搜索</small></button>
+          </div>
           <div class="cpop" id="modelMenu">
             <button class="cmrow" onclick="pickModel('claude-sonnet-4-6','Sonnet 4.6',this)">Sonnet 4.6<small>均衡 · 默认</small><span class="ctick">✓</span></button>
             <button class="cmrow" onclick="pickModel('claude-opus-4-8','Opus 4.8',this)">Opus 4.8<small>最强 · 较贵</small></button>
@@ -846,6 +853,15 @@ function pickModel(id, label, el){
   el.appendChild(tick);
   closeCMenus();
 }
+let selectedMode = 'auto';
+function pickMode(id, label, el){
+  selectedMode = id;
+  document.getElementById('modeLbl').textContent = label;
+  document.querySelectorAll('#modeMenu .ctick').forEach(t=>t.remove());
+  const tick=document.createElement('span'); tick.className='ctick'; tick.textContent='✓';
+  el.appendChild(tick);
+  closeCMenus();
+}
 document.addEventListener('click', e => {
   if(!e.target.closest('.cpop') && !e.target.closest('.cplus') && !e.target.closest('#modelBtn'))
     closeCMenus();
@@ -1029,7 +1045,7 @@ async function send(){
   let acc='';
   try{
     const res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({messages:history, skills:[...selected], model:selectedModel, attachments:attIds})});
+        body:JSON.stringify({messages:history, skills:[...selected], model:selectedModel, mode:selectedMode, attachments:attIds})});
     const reader=res.body.getReader(); const dec=new TextDecoder(); let buf='';
     while(true){
       const {value,done}=await reader.read(); if(done) break;
@@ -1039,6 +1055,9 @@ async function send(){
         if(!line.startsWith('data:')) continue;
         const ev=JSON.parse(line.slice(5).trim());
         if(ev.type==='token'){ acc+=ev.text; bubble.textContent=acc; bubble.appendChild(cur); }
+        else if(ev.type==='route'){
+          const b=document.createElement('div'); b.className='route-badge'+(ev.route==='general'?' general':'');
+          b.textContent='routed: '+ev.route+(ev.by?' · '+ev.by:''); bubble.parentNode.insertBefore(b, bubble); }
         else if(ev.type==='tool'){ if(cur.parentNode)cur.remove();
           if(ev.name==='propose_hypothesis') renderHypothesisCard(ev.args||{});
           else addTool(ev.name,ev.args); }
