@@ -6,9 +6,9 @@ estimate, but with the lower/upper bound of a bootstrap CI on the Brier skill?
 
 A prediction market is itself a strong, well-calibrated baseline. So an "alpha
 test" scores the model's probabilities AND the market's on the same resolved
-markets, takes the Brier delta (model − market; negative = the model is better),
+markets, takes the Brier delta (market − model; positive = the model is better),
 and bootstraps a CI on that delta. The model only "beats the market" when the
-WHOLE CI sits below zero. The result is an :class:`EvalSummary` — exactly what
+WHOLE CI sits above zero. The result is an :class:`EvalSummary` — exactly what
 the promotion gates read (gate 2 needs ``beats_market`` and enough samples).
 
 Pure / deterministic (seeded bootstrap); no LLM, no network.
@@ -32,7 +32,7 @@ def _resolved(records: list[dict]) -> list[dict]:
 def bootstrap_brier_delta_ci(model: list[float], market: list[float], y: list[float],
                              *, n_boot: int = 1000, seed: int = 0,
                              alpha: float = 0.05) -> tuple[float, float]:
-    """Percentile CI on (Brier_model − Brier_market) by resampling markets."""
+    """Percentile CI on (Brier_market - Brier_model) by resampling markets."""
     n = len(y)
     if n == 0:
         return (0.0, 0.0)
@@ -41,7 +41,7 @@ def bootstrap_brier_delta_ci(model: list[float], market: list[float], y: list[fl
     for _ in range(n_boot):
         idx = [rng.randrange(n) for _ in range(n)]
         m = [model[i] for i in idx]; mk = [market[i] for i in idx]; yy = [y[i] for i in idx]
-        deltas.append(brier_score(m, yy) - brier_score(mk, yy))
+        deltas.append(brier_score(mk, yy) - brier_score(m, yy))
     deltas.sort()
     lo = deltas[int((alpha / 2) * n_boot)]
     hi = deltas[min(n_boot - 1, int((1 - alpha / 2) * n_boot))]
@@ -69,8 +69,8 @@ def alpha_test(records: list[dict], *, category: str | None = None,
     bm, bk = brier_score(model, y), brier_score(market, y)
     ci = bootstrap_brier_delta_ci(model, market, y, n_boot=n_boot, seed=seed)
     return EvalSummary(
-        n=n, brier_model=bm, brier_market=bk, brier_delta=bm - bk,
+        n=n, brier_model=bm, brier_market=bk, brier_delta=bk - bm,
         brier_delta_ci=ci, ece=ece(model, y),
-        beats_market=ci[1] < 0,                 # whole CI below 0 → model Brier lower = better
+        beats_market=ci[0] > 0,                 # whole CI above 0 -> model Brier lower = better
         sample_adequate=n >= min_samples,
     )

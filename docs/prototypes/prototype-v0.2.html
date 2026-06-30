@@ -617,7 +617,7 @@
                     <dt>category</dt><dd>crypto</dd>
                     <dt>features</dt><dd>news_event, orderbook_pressure, rag_similar</dd>
                     <dt>baseline</dt><dd>market_price · no_news_llm</dd>
-                    <dt>success</dt><dd>brier_delta &lt; -0.01 · ece &lt; 0.04 · n ≥ 30</dd>
+                    <dt>success</dt><dd>brier_delta &gt; 0.01 · ece &lt; 0.04 · n ≥ 30</dd>
                   </dl>
                 </div>
                 <div class="artifact-actions">
@@ -735,7 +735,7 @@
                 <span class="cmd">$ run_backtest --hypothesis H-006 --window 90d --slice crypto</span><br>
                 settled: <span class="ok">28</span> · pending: 14<br>
                 brier_model: <span class="ok">0.154</span> · brier_market: 0.191<br>
-                brier_delta: <span class="ok">-0.037</span> · bootstrap CI [-0.061, -0.013]<br>
+                brier_delta: <span class="ok">+0.037</span> · bootstrap CI [0.013, 0.061]<br>
                 ece_model: <span class="ok">0.038</span><br>
                 leak_checks: <span class="ok">PASS</span> (8 invariants tested)<br>
                 verdict: <span class="ok">EDGE_OBSERVED</span> · n=28 (below gate-2 threshold of 30)
@@ -776,7 +776,7 @@
               <div class="event">
                 <strong>Backtest v3 run</strong>
                 <span>2026-06-22 · n=28</span>
-                <div class="ev-meta">brier_delta -0.037 · CI excludes 0</div>
+                <div class="ev-meta">brier_delta +0.037 · CI excludes 0</div>
               </div>
               <div class="event">
                 <strong>Gate 2 — pending</strong>
@@ -1069,7 +1069,7 @@
 
         <div class="metrics">
           <div class="metric"><div class="k">tracked</div><div class="v mono">38</div><div class="s">12 PIT-clean</div></div>
-          <div class="metric"><div class="k">beating market</div><div class="v pos">7</div><div class="s">brier delta &lt; -0.01</div></div>
+          <div class="metric"><div class="k">beating market</div><div class="v pos">7</div><div class="s">brier delta &gt; 0.01</div></div>
           <div class="metric"><div class="k">paper-eligible</div><div class="v">3</div><div class="s">walk-book fill &gt; 80%</div></div>
           <div class="metric"><div class="k">avg ECE</div><div class="v mono warn">0.041</div><div class="s">politics better than macro</div></div>
         </div>

@@ -104,6 +104,12 @@ Required EvaluationReport fields:
 - `pit_warnings`
 - `generated_at`
 
+Metric convention:
+
+- `brier_delta = brier_market - brier_model`
+- positive `brier_delta` means the model beats the market baseline
+- `beats_market` is true only when `brier_delta_ci[0] > 0`
+
 ## 5. User Stories
 
 ### L1: Create Hypothesis

@@ -66,7 +66,7 @@ def propose_hypothesis(statement: str, category: str = "", feature_set: str = ""
     statement: the hypothesis in one sentence.
     category: the market slice it applies to (crypto / politics / macro / …).
     feature_set: comma-separated features it would use (e.g. "news_event, rag_similar").
-    success_criteria: what would confirm it (e.g. "brier_delta < -0.01, ece < 0.04, n >= 30").
+    success_criteria: what would confirm it (e.g. "brier_delta > 0.01, ece < 0.04, n >= 30").
     """
     return (f"Proposed a Hypothesis for the user to review and Promote:\n"
             f"- statement: {statement}\n- category: {category or 'n/a'}\n"

@@ -516,7 +516,7 @@ baseline:
   - market_price
   - no_news_llm
 success_metric:
-  - brier_delta_vs_market < -0.01
+  - brier_delta_vs_market > 0.01
   - ece < 0.04
   - forward_test_apy > 15%
 ```

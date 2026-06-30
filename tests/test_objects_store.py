@@ -25,12 +25,12 @@ def test_to_from_dict_roundtrip_preserves_object():
 
 def test_roundtrip_with_lineage_and_eval_summary():
     h = promote(_hyp(), "lab", promoted_by="user:alice", evidence_ref="sess_1")
-    ev = EvalSummary(n=40, brier_model=0.15, brier_market=0.18, brier_delta=-0.03,
-                     brier_delta_ci=(-0.05, -0.01), ece=0.03, beats_market=True,
+    ev = EvalSummary(n=40, brier_model=0.15, brier_market=0.18, brier_delta=0.03,
+                     brier_delta_ci=(0.01, 0.05), ece=0.03, beats_market=True,
                      sample_adequate=True)
     h = type(h)(**{**to_dict(h), "lineage": h.lineage, "eval_summary": ev})
     h2 = from_dict(to_dict(h))
-    assert h2.eval_summary.brier_delta_ci == (-0.05, -0.01)
+    assert h2.eval_summary.brier_delta_ci == (0.01, 0.05)
     assert h2.lineage.events[0].promoted_by == "user:alice"
 
 

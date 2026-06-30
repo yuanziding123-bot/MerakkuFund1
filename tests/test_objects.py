@@ -10,11 +10,11 @@ from polyagents.objects import (
 
 
 def _edge(delta_ci, *, n=40, ece=0.03):
-    """An EvalSummary whose beats_market reflects the CI upper bound < 0."""
+    """An EvalSummary whose beats_market reflects the CI lower bound > 0."""
     lo, hi = delta_ci
     return EvalSummary(n=n, brier_model=0.15, brier_market=0.18,
                        brier_delta=(lo + hi) / 2, brier_delta_ci=delta_ci,
-                       ece=ece, beats_market=hi < 0, sample_adequate=n >= 30)
+                       ece=ece, beats_market=lo > 0, sample_adequate=n >= 30)
 
 
 def test_make_starts_at_version_1_with_empty_lineage():
@@ -65,13 +65,13 @@ def test_revise_bumps_version_keeps_state():
 
 def test_eval_gate_needs_real_edge_sample_and_calibration():
     # CI excludes 0 on the good side, enough samples, ECE in tolerance -> pass
-    assert eval_gate_passed(_edge((-0.061, -0.013), n=40, ece=0.038))
+    assert eval_gate_passed(_edge((0.013, 0.061), n=40, ece=0.038))
     # CI includes 0 -> edge not proven
     assert not eval_gate_passed(_edge((-0.05, 0.01)))
     # too few samples
-    assert not eval_gate_passed(_edge((-0.06, -0.02), n=28))
+    assert not eval_gate_passed(_edge((0.02, 0.06), n=28))
     # calibration out of tolerance
-    assert not eval_gate_passed(_edge((-0.06, -0.02), ece=0.077))
+    assert not eval_gate_passed(_edge((0.02, 0.06), ece=0.077))
     # nothing to judge
     assert not eval_gate_passed(None)
 
