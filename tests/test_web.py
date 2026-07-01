@@ -74,6 +74,9 @@ def test_lab_ui_uses_lab_api_contract():
     assert "m.beats_market || m.brier_delta>0" in html
     assert "review report" in html and "openLabReport" in html
     assert "本地已结算价格历史" in html
+    assert "log_loss_model" in html
+    assert "pit_warnings" in html
+    assert "signal_model" in html or "model=" in html
     assert "fetch('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html
     assert "'/api/lab/reports/'+encodeURIComponent(r.report_id)" in html

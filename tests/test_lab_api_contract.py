@@ -96,6 +96,10 @@ def test_lab_http_create_backtest_report_flow(tmp_path, monkeypatch):
     assert body["type"] == "evaluation_report"
     assert body["hypothesis_id"] == hypothesis_id
     assert body["time_window"]["end"] == "2026-06-01T00:00:00Z"
+    assert body["backtest_config"]["max_markets"] == 100
+    assert body["market_universe"]["source"] in {"collections", "fixture"}
+    assert "data_quality" in body
+    assert "scorecard" in body
     assert body["metrics"]["n"] == len(body["market_sample"])
 
     detail = client.get(f"/api/lab/hypotheses/{hypothesis_id}").json()

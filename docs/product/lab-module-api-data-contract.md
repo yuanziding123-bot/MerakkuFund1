@@ -201,6 +201,35 @@ Rules:
     "start": "2026-03-01T00:00:00Z",
     "end": "2026-06-01T00:00:00Z"
   },
+  "backtest_config": {
+    "market_filter": {
+      "category": "crypto",
+      "settled_only": true
+    },
+    "max_markets": 100,
+    "model_version": "claude-sonnet-4",
+    "prompt_version": "signal-v1",
+    "calibrator_id": "shrink-to-market-v1",
+    "pit_strict": true,
+    "signal_model_id": "linear-factor-v1"
+  },
+  "market_universe": {
+    "source": "collections",
+    "requested_max_markets": 100,
+    "fetched_markets": 42,
+    "eligible_markets": 38,
+    "skipped_by_category": 2,
+    "skipped_unresolved": 2,
+    "skipped_pit": 0,
+    "category": "crypto",
+    "settled_only": true
+  },
+  "data_quality": {
+    "pit_clean": true,
+    "pit_warning_count": 0,
+    "coverage_ratio": 0.38,
+    "uses_fixture_data": false
+  },
   "metrics": {
     "n": 42,
     "brier_model": 0.14,
@@ -208,6 +237,12 @@ Rules:
     "brier_delta": 0.02,
     "brier_delta_ci": [0.008, 0.033],
     "ece": 0.03
+  },
+  "scorecard": {
+    "model_log_loss": 0.41,
+    "market_log_loss": 0.45,
+    "calibration_bins": [],
+    "market_calibration_bins": []
   },
   "gates": {
     "sample_adequate": false,
@@ -223,12 +258,54 @@ Rules:
       "question": "Will BTC close above ...?",
       "p_cal": 0.61,
       "p_market": 0.54,
-      "outcome": 1
+      "outcome": 1,
+      "brier_model": 0.1521,
+      "brier_market": 0.2116,
+      "brier_delta": 0.0595,
+      "signal_model": {
+        "id": "linear-factor-v1",
+        "source": "deterministic_factor_model",
+        "baseline": "market_price",
+        "p_market": 0.54,
+        "p_raw": 0.68,
+        "score_delta": 0.14,
+        "feature_vector": {
+          "sentiment": 0.4,
+          "flow_imbalance": 0.3
+        },
+        "feature_contributions": {
+          "sentiment": 0.072,
+          "flow_imbalance": 0.036
+        }
+      },
+      "snapshot_manifest": {
+        "token_id": "token_yes",
+        "snapshot_id": "snap_market_001",
+        "prediction_time": "2026-04-10T12:00:00Z",
+        "available_at_max": "2026-04-10T11:58:30Z",
+        "pit_status": "clean",
+        "sources": [
+          {
+            "source": "features",
+            "available_at": "2026-04-10T11:58:30Z",
+            "fields": ["factors"]
+          }
+        ]
+      }
     }
   ],
   "generated_at": "2026-06-25T00:00:00Z"
 }
 ```
+
+`signal_model` is a per-sample explanation object. In MVP the default model is
+`linear-factor-v1`, a deterministic weighted factor model. If historical
+collection data already contains `lab.p_raw`, the report may mark the source as
+`lab_override` while preserving the deterministic model output as `p_raw_model`.
+
+`snapshot_manifest` is the point-in-time evidence manifest for the sample. It
+lists the prediction time, latest known feature availability, and source fields
+used to reconstruct the historical snapshot.
 
 ## 5. Storage Contract
 
