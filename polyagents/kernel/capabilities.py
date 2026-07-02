@@ -48,7 +48,23 @@ def answer_capability(answer_fn: Callable) -> Capability:
     """
     def run(ctx: Context) -> dict:
         return {"answer": answer_fn(ctx.facts.get("question", ""))}
-    return Capability("langgraph_answer", "Open-ended Q&A via the LangGraph ReAct agent.",
+    return Capability("langgraph_answer",
+                      "General / open-ended Q&A (concepts, coding, outside info) via a "
+                      "general agent with web search. NOT for our own market data.",
+                      frozenset({"question"}), frozenset({"answer"}), run, cost=3)
+
+
+def domain_capability(answer_fn: Callable) -> Capability:
+    """Wrap the read-only market-tools ReAct agent as ONE capability: question →
+    answer, using live domain tools (scan / orderbook / evaluate). Same effect as
+    ``langgraph_answer`` so the controller picks by *fit* — this one when the
+    question is about OUR prediction markets / data / evaluation. ``answer_fn(q)->str``.
+    """
+    def run(ctx: Context) -> dict:
+        return {"answer": answer_fn(ctx.facts.get("question", ""))}
+    return Capability("domain_answer",
+                      "Q&A about OUR prediction markets / data / evaluation using live "
+                      "read-only tools (scan markets, orderbook, calibration/evaluate).",
                       frozenset({"question"}), frozenset({"answer"}), run, cost=3)
 
 

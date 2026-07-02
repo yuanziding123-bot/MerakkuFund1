@@ -7,8 +7,8 @@ the production wiring). Needs network / ANTHROPIC_API_KEY at run time.
 """
 from __future__ import annotations
 
-from .capabilities import (answer_capability, backtest_capability,
-                           data_capability, strategy_capability)
+from .capabilities import (answer_capability, backtest_capability, data_capability,
+                           domain_capability, strategy_capability)
 
 
 def default_registry() -> list:
@@ -38,12 +38,20 @@ def default_registry() -> list:
                 "brier_delta": s.brier_delta, "beats_market": s.beats_market,
                 "ci": list(s.brier_delta_ci)}
 
-    def answer(question):
-        from polyagents.web.agent import build_general_agent
-        res = build_general_agent().invoke({"messages": [("user", question or "")]})
+    def _last_content(res):
         msgs = res.get("messages", []) if isinstance(res, dict) else []
         last = msgs[-1] if msgs else None
         return getattr(last, "content", "") if last is not None else ""
+
+    def answer(question):                              # general / web-search agent
+        from polyagents.web.agent import build_general_agent
+        return _last_content(build_general_agent().invoke(
+            {"messages": [("user", question or "")]}))
+
+    def domain_answer(question):                       # read-only market-tools agent
+        from polyagents.web.agent import build_agent
+        return _last_content(build_agent(readonly=True).invoke(
+            {"messages": [("user", question or "")]}))
 
     def run_strategy(market):
         from polyagents.orchestration import run_strategy as _rs
@@ -54,5 +62,6 @@ def default_registry() -> list:
         data_capability(fetch),
         backtest_capability(backtest),
         answer_capability(answer),
+        domain_capability(domain_answer),
         strategy_capability(run_strategy),
     ]
