@@ -517,6 +517,93 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     return JSONResponse({"files": out})
 
 
+def _kernel_summary(ctx) -> str:
+    """Render a kernel Context into a readable answer for the chat bubble."""
+    f = ctx.facts
+    path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
+    if "answer" in f:                                   # ReAct capability — its text IS the answer
+        body = f["answer"]
+        if isinstance(body, list):
+            body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
+        return str(body)
+    if "backtest_report" in f:
+        r = f["backtest_report"]
+        return (f"**kernel** {path}\n\n"
+                f"回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
+                f"brier_delta={r.get('brier_delta')} · beats_market={r.get('beats_market')} · "
+                f"ci={r.get('ci')}")
+    if "decision" in f:
+        return f"**kernel** {path}\n\ndecision: {f['decision']}"
+    if "evaluation" in f:
+        return f"**kernel** {path}\n\nevaluation: {f['evaluation']}"
+    return f"**kernel** 无法完成目标 {sorted(ctx.goal.targets)}(路径: {path})。"
+
+
+async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncIterator[str]:
+    """Kernel mode: the request goes through the ONE kernel loop, which recognises
+    intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
+    …). The prior turns are passed as cross-turn memory. Runs the sync loop in a
+    thread and bridges its ``on_event`` to SSE."""
+    from polyagents.kernel import run_mode
+
+    # split the conversation into the current request + the prior turns (memory)
+    last_idx = next((i for i in range(len(history) - 1, -1, -1)
+                     if history[i].get("role") == "user"), None)
+    last_text = str(history[last_idx].get("content", "")) if last_idx is not None else ""
+    prior = [(m.get("role"), str(m.get("content", "")))
+             for m in history[:last_idx]] if last_idx is not None else []
+
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def on_event(ev: dict) -> None:
+        loop.call_soon_threadsafe(q.put_nowait, ev)
+
+    def work() -> None:
+        try:
+            ctx = run_mode("kernel", request=last_text, history=prior, on_event=on_event)
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
+        except Exception as exc:                        # surface, don't crash the stream
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
+
+    fut = loop.run_in_executor(None, work)
+    session.log("route.decided", route="kernel", by="manual")
+    yield _sse({"type": "route", "route": "kernel", "by": "manual"})
+    streamed = False                                    # did any real token flow out?
+    while True:
+        ev = await q.get()
+        t = ev.get("type")
+        if t == "token":                                # inner capability tokens — real streaming
+            streamed = True
+            yield _sse({"type": "token", "text": ev.get("text", "")})
+        elif t in ("tool", "tool_result"):              # inner tool-calls (e.g. web_search)
+            yield _sse(ev)
+        elif t == "capability.start":
+            session.log("kernel.capability", name=ev.get("name"))
+            yield _sse({"type": "tool", "name": ev.get("name")})
+        elif t == "capability.done":
+            yield _sse({"type": "tool_result", "name": ev.get("name")})
+        elif t == "capability.error":
+            yield _sse({"type": "error", "message": f"{ev.get('name')}: {ev.get('error')}"})
+        elif t == "_result":
+            if not streamed:                            # nothing streamed → emit the summary/answer
+                for chunk in _chunk_text(_kernel_summary(ev["ctx"])):
+                    yield _sse({"type": "token", "text": chunk})
+            break
+        elif t == "_error":
+            yield _sse({"type": "error", "message": ev["message"]})
+            break
+        # loop.start / loop.end are informational — path shows in the summary
+    await fut
+    session.log("session.end")
+    yield _sse({"type": "done"})
+
+
+def _chunk_text(text: str, size: int = 24):
+    for i in range(0, len(text), size):
+        yield text[i:i + size]
+
+
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
                   attachments: list[str] | None = None,
                   mode: str = "auto") -> AsyncIterator[str]:
@@ -526,6 +613,14 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     # route the question to a Domain (tools) or General (web_search) handler
     last_text = next((str(m.get("content", "")) for m in reversed(history)
                       if m.get("role") == "user"), "")
+    # Kernel mode: one goal-directed loop auto-recognises intent + picks the path,
+    # with the prior turns as cross-turn memory.
+    if mode == "kernel":
+        session.log("session.start", model=model, skills=skills,
+                    attachments=len(attachments or []))
+        async for ev in _stream_kernel(history, session):
+            yield ev
+        return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
                          llm=_classifier_llm())
     session.log("session.start", model=model, skills=skills,
