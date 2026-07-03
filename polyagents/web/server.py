@@ -34,6 +34,7 @@ from polyagents.default_config import DEFAULT_CONFIG
 from polyagents.lab.backtest import BacktestRunner, get_backtest_run, get_report
 from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
 from polyagents.lab.service import create_hypothesis, default_repository, get_hypothesis, list_hypotheses
+from polyagents.storage.db import DataStore
 
 from polyagents.runtime.session import AgentSession
 
@@ -187,10 +188,12 @@ async def lab_hypothesis_detail(id: str) -> JSONResponse:
 
 @app.post("/api/lab/hypotheses/{id}/backtests")
 async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
+    store = None
     try:
         payload = await request.json()
         body = {**payload, "hypothesis_id": id}
-        result = BacktestRunner().run(BacktestRequest(**body))
+        store = DataStore(DEFAULT_CONFIG["db_path"])
+        result = BacktestRunner(store=store).run(BacktestRequest(**body))
         return JSONResponse({
             "backtest_run_id": result.id,
             "status": result.status,
@@ -198,6 +201,9 @@ async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
         })
     except Exception as exc:
         return JSONResponse({"error": {"code": "evaluation_failed", "message": str(exc)}}, status_code=400)
+    finally:
+        if store is not None:
+            store.close()
 
 
 @app.get("/api/lab/backtests/{id}")

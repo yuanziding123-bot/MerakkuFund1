@@ -12,6 +12,12 @@ Lab has moved from planning into a working MVP foundation. We now have product s
 Hypothesis -> DataStore collections -> Forecasts -> EvaluationReport -> SQLite persistence
 ```
 
+The historical-data path has now been extended so each EvaluationReport can
+explain how the historical sample was reconstructed. Stored collection samples
+carry a snapshot manifest, PIT status, feature vector, factor contribution
+breakdown, and a versioned signal model id. This moves Lab from "simple score"
+toward auditable historical research.
+
 Relevant tests are passing:
 
 ```text
@@ -212,6 +218,29 @@ Updated:
 
 This is the first step toward real historical replay.
 
+## 8.1 Historical Backtest Accuracy Upgrade
+
+Implemented the first two planned upgrades for the historical-data mode:
+
+1. Snapshot manifest per market sample.
+   - Each `market_sample` now includes `snapshot_manifest`.
+   - The manifest records `snapshot_id`, `prediction_time`, `available_at_max`,
+     source names, source fields, and PIT status.
+   - This makes it possible to inspect which historical information was
+     available when the forecast was created.
+
+2. Versioned deterministic factor model.
+   - The former inline `_score_collection` heuristic is now represented as
+     `linear-factor-v1`.
+   - Each sample records `signal_model.id`, `baseline`, `p_market`, `p_raw`,
+     `score_delta`, `feature_vector`, `feature_contributions`, and weights.
+   - If stored collection data supplies `lab.p_raw`, the report can mark the
+     row as `lab_override` while retaining the deterministic model output for
+     comparison.
+
+These changes keep `ForecastRecord` and the SQLite schema stable. The richer
+research metadata lives in the persisted EvaluationReport JSON.
+
 ## 9. Tests Added
 
 Added:
@@ -275,11 +304,27 @@ These large untracked directories remain untouched and should not be included in
 
 Recommended next implementation steps:
 
-1. Build Lab UI pages on top of the new `/api/lab/*` routes.
-2. Replace heuristic `_score_collection` with a proper signal/calibration path.
-3. Add report detail fields back into persisted `evaluations`, including `time_window`, `market_sample`, and PIT warnings.
-4. Add audit event writes for API calls and permission failures.
-5. Decide how to reconcile `amber/main` Ask changes with `adapt/vibe-trading-skills` without mixing the conflict resolution into the Lab MVP commit.
+1. Add walk-forward historical splits.
+   - Separate train, validation, and test windows.
+   - Fit factor weights or calibrators only on earlier windows.
+   - Report split boundaries and sample counts.
+
+2. Add stronger baselines.
+   - Keep `market_price` as the primary baseline.
+   - Add category naive, previous snapshot, no-news, and no-flow ablation
+     baselines.
+   - Report which factor families are actually contributing edge.
+
+3. Add trading-layer metrics after probability metrics are stable.
+   - Simulated PnL, Kelly sizing, turnover, spread/slippage, max drawdown.
+   - Keep these separate from probability-quality metrics so reports do not
+     confuse calibration with tradeability.
+
+4. Build Lab UI pages on top of the new `/api/lab/*` routes.
+
+5. Add audit event writes for API calls and permission failures.
+
+6. Decide how to reconcile `amber/main` Ask changes with `adapt/vibe-trading-skills` without mixing the conflict resolution into the Lab MVP commit.
 
 ## 13. Git Recommendation
 

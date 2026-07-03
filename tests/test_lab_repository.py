@@ -57,7 +57,16 @@ def test_backtest_runner_persists_evidence(tmp_path):
     report = repo.get_report(result.report_id)
     assert report["metrics"]["n"] == result.forecast_count
     assert report["time_window"]["start"] == "2026-03-01T00:00:00Z"
+    assert report["backtest_config"]["calibrator_id"] == "shrink-to-market-v1"
+    assert report["market_universe"]["source"] == "fixture"
+    assert report["data_quality"]["uses_fixture_data"] is True
+    assert report["scorecard"]["model_log_loss"] >= 0
+    assert "calibration_bins" in report["scorecard"]
     assert len(report["market_sample"]) == result.forecast_count
+    assert {"brier_model", "brier_market", "brier_delta"} <= set(report["market_sample"][0])
+    assert report["backtest_config"]["signal_model_id"] == "linear-factor-v1"
+    assert report["market_sample"][0]["signal_model"]["id"] == "fixture-v1"
+    assert report["market_sample"][0]["snapshot_manifest"]["pit_status"] == "clean"
     assert report["pit_warnings"] == []
     repo.close()
 
@@ -111,9 +120,62 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     assert forecasts[0]["p_cal"] != forecasts[0]["p_market"]
     report = repo.get_report(result.report_id)
     assert report["metrics"]["n"] == 2
+    assert report["market_universe"]["source"] == "collections"
+    assert report["market_universe"]["eligible_markets"] == 2
+    assert report["data_quality"]["pit_clean"] is True
     assert {m["market_token_id"] for m in report["market_sample"]} == {
         "token_yes_crypto_1",
         "token_yes_crypto_2",
     }
+    assert all(m["source"] == "collections" for m in report["market_sample"])
+    sample = report["market_sample"][0]
+    assert sample["signal_model"]["id"] == "linear-factor-v1"
+    assert "sentiment" in sample["signal_model"]["feature_vector"]
+    assert "sentiment" in sample["signal_model"]["feature_contributions"]
+    assert sample["snapshot_manifest"]["prediction_time"] == "2026-04-01T00:00:00Z"
+    assert sample["snapshot_manifest"]["sources"]
+    store.close()
+    repo.close()
+
+
+def test_backtest_report_surfaces_pit_warnings_when_non_strict(tmp_path):
+    repo = LabRepository(tmp_path / "lab.db")
+    store = DataStore(tmp_path / "data.db")
+    created = create_hypothesis(_request(), repo=repo)
+    store.record_collection(
+        "token_yes_crypto_future",
+        "2026-04-01T00:00:00Z",
+        "Will bitcoin close above 100k?",
+        0.55,
+        {
+            "features": {"factors": {"sentiment": 0.4}},
+            "lab": {
+                "outcome": 1,
+                "available_at_max": "2026-04-02T00:00:00Z",
+            },
+        },
+    )
+    request = BacktestRequest(
+        hypothesis_id=created.id,
+        time_window={
+            "start": "2026-03-01T00:00:00Z",
+            "end": "2026-06-01T00:00:00Z",
+        },
+        market_filter={"category": "crypto", "settled_only": True},
+        model_version="claude-sonnet-4",
+        prompt_version="signal-v1",
+        calibrator_id="shrink-to-market-v1",
+        pit_strict=False,
+    )
+
+    result = BacktestRunner(store=store, repo=repo).run(request)
+
+    report = repo.get_report(result.report_id)
+    assert result.forecast_count == 1
+    assert report["market_universe"]["eligible_markets"] == 1
+    assert report["data_quality"]["pit_clean"] is False
+    assert report["data_quality"]["pit_warning_count"] == 1
+    assert report["pit_warnings"][0]["market_token_id"] == "token_yes_crypto_future"
+    assert report["market_sample"][0]["snapshot_manifest"]["pit_status"] == "warning"
     store.close()
     repo.close()

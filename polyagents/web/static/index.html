@@ -1162,6 +1162,25 @@ function labMetric(m, key, fallback='—'){
   const v=m && m[key];
   return (typeof v === 'number') ? v.toFixed(3) : (v ?? fallback);
 }
+async function labFetchJson(url, options){
+  let response;
+  try{
+    response = await fetch(url, options);
+  }catch(e){
+    throw new Error(`Lab API 无法连接：${location.origin}${url}。请确认 web 服务正在运行并刷新页面。(${e.message||e})`);
+  }
+  let data;
+  try{
+    data = await response.json();
+  }catch(e){
+    throw new Error(`Lab API 返回了非 JSON 响应：HTTP ${response.status}`);
+  }
+  if(!response.ok || (data && data.error)){
+    const msg = data && data.error ? (data.error.message || data.error) : `HTTP ${response.status}`;
+    throw new Error(`Lab API 请求失败：${msg}`);
+  }
+  return data;
+}
 function labLatestReport(id){
   const detail = labDetails[id] || {};
   const reports = detail.reports || [];
@@ -1169,8 +1188,7 @@ function labLatestReport(id){
 }
 async function loadLabHypos(){
   try{
-    const r = await (await fetch('/api/lab/hypotheses')).json();
-    if(r.error) throw new Error(r.error.message || r.error);
+    const r = await labFetchJson('/api/lab/hypotheses');
     labHypos = r.items || [];
     renderLabList(); renderLabTable(); renderLabMetrics();
     if(labHypos.length){ selectLabHypo((labHypos.find(h=>h.id===labSelId)||labHypos[0]).id); }
@@ -1179,7 +1197,11 @@ async function loadLabHypos(){
       document.getElementById('labGates').innerHTML=''; document.getElementById('labLineage').innerHTML='<div class="hist">—</div>';
       document.getElementById('labSelId').textContent='—'; document.getElementById('labSelState').textContent='';
     }
-  }catch(e){ document.getElementById('labHypoBody').innerHTML='<tr><td colspan="8" class="hist">failed to load</td></tr>'; }
+  }catch(e){
+    const msg=esc(e.message||e);
+    document.getElementById('labHypoBody').innerHTML=`<tr><td colspan="8" class="hist">failed to load · ${msg}</td></tr>`;
+    const el=document.getElementById('convList'); if(el && curView==='lab') el.innerHTML=`<div class="hgroup">Hypotheses</div><div class="hist">Lab API 暂时不可用：${msg}</div>`;
+  }
 }
 function renderLabList(){
   const el=document.getElementById('convList'); if(!el || curView!=='lab') return;
@@ -1201,8 +1223,7 @@ async function selectLabHypo(id){
   const bs=document.getElementById('btSlice'); if(bs) bs.textContent='· slice: '+cat;
   renderLabGates(h); renderLabDetail(h); renderLabLineage(h);
   try{
-    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id))).json();
-    if(r.error) throw new Error(r.error.message || r.error);
+    const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id));
     labDetails[id]=r;
     renderLabMetrics(); renderLabTable();
     renderLabGates(r.hypothesis || h); renderLabDetail(r.hypothesis || h); renderLabLineage(r.hypothesis || h);
@@ -1303,11 +1324,10 @@ async function submitLabHypothesis(){
     .split(',').map(s=>s.trim()).filter(Boolean);
   const btn=document.getElementById('labCreateSubmit'); btn.disabled=true; btn.textContent='creating…';
   try{
-    const r=await (await fetch('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await labFetchJson('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
         prompt_version:'signal-v1', model_version:'claude-sonnet-4',
-        lineage:{source:'manual:web', parents:[]}})})).json();
-    if(r.error){ alert(r.error.message || r.error); return; }
+        lineage:{source:'manual:web', parents:[]}})});
     labSelId=r.id;
     document.getElementById('labNewStatement').value='';
     hideLabCreate();
@@ -1328,33 +1348,50 @@ async function runLabBacktest(id){
     const body={time_window:defaultLabWindow(), market_filter:{category:(h&&h.category_filter)||'crypto', settled_only:true},
       model_version:(h&&h.model_version)||'claude-sonnet-4', prompt_version:(h&&h.prompt_version)||'signal-v1',
       calibrator_id:'shrink-to-market-v1', pit_strict:true, max_markets:100};
-    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)})).json();
-    if(r.error){ throw new Error(r.error.message || r.error); }
-    const report=await (await fetch('/api/lab/reports/'+encodeURIComponent(r.report_id))).json();
-    if(report.error){ throw new Error(report.error.message || report.error); }
+    const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    const report=await labFetchJson('/api/lab/reports/'+encodeURIComponent(r.report_id));
     labReports[report.id]=report;
     await selectLabHypo(id);
     renderLabReport(report);
-  }catch(e){ alert(e); }
+  }catch(e){ alert(e.message||e); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Run evidence backtest'; } }
 }
 async function openLabReport(id){
   try{
-    const report=labReports[id] || await (await fetch('/api/lab/reports/'+encodeURIComponent(id))).json();
-    if(report.error){ throw new Error(report.error.message || report.error); }
+    const report=labReports[id] || await labFetchJson('/api/lab/reports/'+encodeURIComponent(id));
     labReports[id]=report; renderLabReport(report);
-  }catch(e){ alert(e); }
+  }catch(e){ alert(e.message||e); }
 }
 function renderLabReport(rep){
   const m=rep.metrics||{};
+  const dq=rep.data_quality||{};
+  const uni=rep.market_universe||{};
+  const sc=rep.scorecard||{};
+  const sourceLabel = uni.source === 'collections'
+    ? '<span class="v-pos">真实历史 collections</span>'
+    : (uni.source === 'fixture'
+      ? '<span class="v-neg">fixture fallback · 仅演示链路</span>'
+      : `<span class="mut">${esc(uni.source||'unknown source')}</span>`);
+  const sampleNote = m.sample_adequate === false
+    ? '<div class="hist" style="margin:6px 0">样本量不足，当前结果用于 demo / research evidence，不可作为 promotion 或真实交易依据。</div>'
+    : '';
+  const fixtureNote = dq.uses_fixture_data
+    ? '<div class="hist" style="margin:6px 0">当前报告使用 fixture fallback，不代表真实历史数据结果。请先采集 DataStore collections 后再用于正式汇报。</div>'
+    : '';
+  const warnings=(rep.pit_warnings||[]).slice(0,3).map(w=>
+    `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
   const sample=(rep.market_sample||[]).slice(0,5).map(x=>
-    `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome}`).join('\n');
+    `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}`).join('\n');
   document.getElementById('btResult').innerHTML=
-    `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
+    `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
+    sampleNote + fixtureNote +
     `<pre class="evalbox">window: ${(rep.time_window&&rep.time_window.start)||'—'} → ${(rep.time_window&&rep.time_window.end)||'—'}\n`+
+    `source: ${uni.source||'—'} · fixture: ${dq.uses_fixture_data===true} · fetched: ${uni.fetched_markets??'—'} · eligible: ${uni.eligible_markets??'—'} · skipped: category=${uni.skipped_by_category??0}, unresolved=${uni.skipped_unresolved??0}, pit=${uni.skipped_pit??0}\n`+
     `n: ${m.n} · brier_model: ${Number(m.brier_model||0).toFixed(3)} · brier_market: ${Number(m.brier_market||0).toFixed(3)}\n`+
     `brier_delta: ${Number(m.brier_delta||0).toFixed(3)} · ece: ${Number(m.ece||0).toFixed(3)} · sample_adequate: ${m.sample_adequate}\n`+
+    `log_loss_model: ${Number(sc.model_log_loss||0).toFixed(3)} · log_loss_market: ${Number(sc.market_log_loss||0).toFixed(3)} · pit_clean: ${dq.pit_clean!==false}\n`+
+    `pit_warnings:\n${esc(warnings || '—')}\n`+
     `market_sample:\n${esc(sample || '—')}</pre>`;
 }
 async function runHistBacktest(){
