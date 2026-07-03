@@ -1,10 +1,10 @@
 """Evaluation reports for Lab probability research."""
 from __future__ import annotations
 
-import math
+import random
 from dataclasses import dataclass
 
-from .metrics import brier_score, ece
+from .metrics import brier_score, calibration_curve, ece, log_loss
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -24,15 +24,33 @@ class EvalSummary:
         object.__setattr__(self, "beats_market", bool(self.brier_delta_ci[0] > 0))
 
 
-def _normal_ci(values: list[float]) -> tuple[float, float]:
+def bootstrap_ci(values: list[float], *, n_boot: int = 1000, seed: int = 0) -> tuple[float, float]:
+    """Percentile bootstrap CI for per-market Brier skill deltas.
+
+    Values use the project-wide convention: ``market_brier - model_brier``.
+    Positive means the model beat the market baseline.
+    """
     if not values:
         return (float("nan"), float("nan"))
-    mean = sum(values) / len(values)
     if len(values) == 1:
-        return (mean, mean)
-    variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-    margin = 1.96 * math.sqrt(variance / len(values))
-    return (mean - margin, mean + margin)
+        return (values[0], values[0])
+    rng = random.Random(seed)
+    n = len(values)
+    means = []
+    for _ in range(n_boot):
+        means.append(sum(values[rng.randrange(n)] for _ in range(n)) / n)
+    means.sort()
+    return (means[int(0.025 * n_boot)], means[min(n_boot - 1, int(0.975 * n_boot))])
+
+
+def scorecard(*, p_cal: list[float], p_market: list[float], outcomes: list[float]) -> dict:
+    """Detailed probability-quality metrics for EvaluationReport."""
+    return {
+        "model_log_loss": log_loss(p_cal, outcomes),
+        "market_log_loss": log_loss(p_market, outcomes),
+        "calibration_bins": calibration_curve(p_cal, outcomes),
+        "market_calibration_bins": calibration_curve(p_market, outcomes),
+    }
 
 
 def build_evaluation_summary(
@@ -53,7 +71,7 @@ def build_evaluation_summary(
         (mkt - y) ** 2 - (model - y) ** 2
         for model, mkt, y in zip(p_cal, p_market, outcomes)
     ]
-    ci = _normal_ci(per_sample_delta)
+    ci = bootstrap_ci(per_sample_delta)
     return EvalSummary(
         n=n,
         brier_model=model_brier,
