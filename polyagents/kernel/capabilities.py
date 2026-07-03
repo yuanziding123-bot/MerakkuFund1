@@ -166,6 +166,36 @@ def analyze_market_capability(analyze_fn: Callable) -> Capability:
                       frozenset({"market_ref"}), frozenset({"market_analysis"}), run, cost=4)
 
 
+def discover_markets_capability(discover_fn: Callable) -> Capability:
+    """Goal-2 step 1: a theme / event / hot topic → candidate tradeable markets.
+
+    ``discover_fn(topic) -> dict`` returns ``{"topic", "markets": [...], "count"}`` —
+    active markets ranked by relevance to the topic (LLM-expanded keywords, so a
+    Chinese topic still matches English market questions). Lands as ``candidates``."""
+    def run(ctx: Context) -> dict:
+        return {"candidates": discover_fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("discover_markets",
+                      "Given a THEME / event / current hot topic (not a specific market), "
+                      "find candidate tradeable Polymarket markets relevant to it. First "
+                      "step for 'recommend a market to bet on <topic>'.",
+                      frozenset({"question"}), frozenset({"candidates"}), run, cost=2)
+
+
+def recommend_markets_capability(recommend_fn: Callable) -> Capability:
+    """Goal-2 step 2: score the candidates and recommend the best with reasoning.
+
+    ``recommend_fn(candidates) -> dict`` runs the analysis core (p_true / edge /
+    action) on the top candidates, ranks by opportunity, and returns the pick plus
+    the ranked shortlist. Reuses the same engine analysis that powers analyze_market."""
+    def run(ctx: Context) -> dict:
+        return {"recommendation": recommend_fn(ctx.facts["candidates"])}
+    return Capability("recommend_markets",
+                      "Score the discovered candidate markets (true probability, edge, "
+                      "action) and RECOMMEND the best trading target with reasons, plus a "
+                      "ranked shortlist. Use after discover_markets for topic → recommendation.",
+                      frozenset({"candidates"}), frozenset({"recommendation"}), run, cost=4)
+
+
 def strategy_capability(run_strategy_fn: Callable) -> Capability:
     """Wrap the multi-agent Strategy supervisor as one capability: market → decision.
 

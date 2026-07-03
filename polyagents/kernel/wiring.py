@@ -10,7 +10,8 @@ from __future__ import annotations
 from .capabilities import (analyze_market_capability, answer_capability,
                            backtest_capability, batch_backtest_capability,
                            batch_collect_capability, data_capability,
-                           domain_capability, resolve_market_capability,
+                           discover_markets_capability, domain_capability,
+                           recommend_markets_capability, resolve_market_capability,
                            scan_capability, strategy_capability)
 
 
@@ -129,6 +130,13 @@ def default_registry() -> list:
         return {"token_id": m.token_id, "question": m.question, "price": m.price,
                 "matched_by": "token_id" if q == m.token_id else "most_active"}
 
+    def _analysis_core(m):
+        """Shared L1+L2 analysis for one market — the scoring core reused by both
+        analyze_market (full framework) and recommend_markets (rank candidates)."""
+        state = eng.analyze(m)                              # L1 collect + L2 signal/decision/reflect (LLM)
+        return {"state": state, "signal": state.get("signal"),
+                "decision": state.get("trade_decision"), "reflection": state.get("reflection")}
+
     def analyze_market(market_ref):
         """Run the whole Goal-1 framework on one market and return a structured result."""
         ref = market_ref or {}
@@ -137,10 +145,8 @@ def default_registry() -> list:
         if m is None:
             return {"error": f"market not found: {ref}", "market_ref": ref}
 
-        state = eng.analyze(m)                              # L1 collect + L2 signal/decision/reflect (LLM)
-        sig = state.get("signal")
-        dec = state.get("trade_decision")
-        refl = state.get("reflection")
+        core = _analysis_core(m)
+        state, sig, dec, refl = core["state"], core["signal"], core["decision"], core["reflection"]
         factors = ((state.get("raw", {}) or {}).get("features", {}) or {}).get("factors", {})
 
         cat, yes = _resolved_yes(m.question)               # 回溯对比: backtest the signal on comparable history
@@ -173,6 +179,67 @@ def default_registry() -> list:
                             "risk_flags": (refl.risk_flags if refl is not None else [])}
                            if dec is not None else {"note": "no decision"}),
         }
+
+    # ----- Goal 2: topic → recommend a trading target ------------------------
+    #   discover_markets -> recommend_markets (reuses the analysis core to score)
+
+    def _topic_terms(topic):
+        """Search terms for a topic: raw words + LLM-extracted English keywords, so a
+        Chinese / free-text topic still matches English market questions."""
+        terms = {w for w in (topic or "").lower().split() if len(w) > 2}
+        try:
+            resp = eng._get_llm().invoke([
+                ("system", "Extract 3-8 short English search keywords/entities (people, "
+                 "teams, places, assets, events) from the user's topic, for matching "
+                 "prediction-market questions. Reply with ONLY a comma-separated list."),
+                ("user", topic or "")])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            terms |= {t.strip().lower() for t in str(text).split(",") if len(t.strip()) > 2}
+        except Exception:
+            pass
+        return terms
+
+    def discover(topic):
+        terms = _topic_terms(topic)
+        rows = mcp_server.scan_markets(limit=40, min_volume_24h=5000.0)
+        scored = []
+        for row in rows:
+            q = str(row.get("question", "")).lower()
+            hits = sum(1 for t in terms if t in q)
+            if hits:
+                scored.append((hits, row))
+        scored.sort(key=lambda t: (t[0], t[1].get("volume_24h", 0.0)), reverse=True)
+        markets = [{**r, "relevance": h} for h, r in scored[:6]]
+        return {"topic": topic, "count": len(markets), "markets": markets,
+                "terms": sorted(terms)}
+
+    def recommend(candidates, top_n=3):
+        cands = (candidates or {}).get("markets", [])[:top_n]
+        scored = []
+        for row in cands:
+            m = mcp_server._get_market(row.get("token_id", ""))
+            if m is None:
+                continue
+            try:
+                core = _analysis_core(m)
+            except Exception:
+                continue
+            sig, dec = core["signal"], core["decision"]
+            scored.append({
+                "token_id": m.token_id, "question": m.question, "price": round(m.price, 4),
+                "p_true": round(sig.p_true, 3) if sig is not None else None,
+                "edge": round(dec.edge, 4) if dec is not None else None,
+                "action": dec.action if dec is not None else None,
+                "annualized_edge": round(dec.annualized_edge, 4) if dec is not None else None,
+                "rationale": sig.rationale if sig is not None else None,
+            })
+        # rank: actionable (buy/sell) first, then by |edge|
+        scored.sort(key=lambda s: (1 if s.get("action") in ("buy", "sell") else 0,
+                                   abs(s.get("edge") or 0.0)), reverse=True)
+        return {"topic": (candidates or {}).get("topic"), "n_scored": len(scored),
+                "ranked": scored, "top_pick": scored[0] if scored else None}
 
     def _last_content(res):
         msgs = res.get("messages", []) if isinstance(res, dict) else []
@@ -210,6 +277,8 @@ def default_registry() -> list:
         batch_backtest_capability(batch_backtest),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
+        discover_markets_capability(discover),
+        recommend_markets_capability(recommend),
         answer_capability(answer, stream_fn=answer_stream),
         domain_capability(domain_answer, stream_fn=domain_stream),
         strategy_capability(run_strategy),

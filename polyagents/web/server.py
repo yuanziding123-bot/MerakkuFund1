@@ -578,6 +578,30 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_recommendation(r: dict, path: str) -> str:
+    """Render the Goal-2 result: topic → ranked candidates → recommended target."""
+    ranked = r.get("ranked") or []
+    top = r.get("top_pick")
+    lines = [f"**标的推荐** · {path}", "", f"**主题**:{r.get('topic')}"]
+    if not ranked:
+        lines.append("\n未找到与该主题相关的活跃可交易标的。可换个更具体的主题(球队/资产/事件名),或直接指定一个市场做分析。")
+        return "\n".join(lines)
+    if top:
+        act = (top.get("action") or "hold").upper()
+        lines.append(f"\n**推荐**:{top.get('question')}  \n"
+                     f"→ **{act}** · p_true={top.get('p_true')} · edge={top.get('edge')} · "
+                     f"APY={top.get('annualized_edge')} · 价 {top.get('price')}")
+        if top.get("rationale"):
+            lines.append(f"　理由:{top['rationale']}")
+    if len(ranked) > 1:
+        lines.append(f"\n**候选排序(共分析 {r.get('n_scored')} 个)**:")
+        for i, s in enumerate(ranked, 1):
+            lines.append(f"{i}. {(s.get('question') or '')[:60]} — "
+                         f"{(s.get('action') or 'hold').upper()} · edge={s.get('edge')} · p_true={s.get('p_true')}")
+    lines.append("\n_注:edge<6% 门槛者结论为 HOLD;推荐=机会相对最好,不代表达到下注门槛。可对推荐标的再跑 analyze_market 看完整框架。_")
+    return "\n".join(lines)
+
+
 def _kernel_summary(ctx) -> str:
     """Render a kernel Context into a readable answer for the chat bubble.
 
@@ -586,6 +610,11 @@ def _kernel_summary(ctx) -> str:
     numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
+    if "recommendation" in f:                           # Goal-2: topic → recommended target
+        out = _format_recommendation(f["recommendation"], path)
+        if "market_analysis" in f:                      # controller also deep-analyzed the pick
+            out += "\n\n---\n\n" + _format_market_analysis(f["market_analysis"], path)
+        return out
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
     if "collections" in f:
