@@ -677,10 +677,7 @@ def _kernel_summary(ctx) -> str:
         return out
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
-    if "collections" in f:
-        c = f["collections"]
-        return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
-                f"store={c.get('store_counts')}")
+    # Final analytical deliverables win over intermediate steps (e.g. collections):
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison
@@ -690,6 +687,10 @@ def _kernel_summary(ctx) -> str:
         return (f"**kernel** {path}\n\n回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
                 f"brier_delta={r.get('brier_delta')} · beats_market={r.get('beats_market')} · "
                 f"ci={r.get('ci')}")
+    if "collections" in f:                              # intermediate: only if no analytical result above
+        c = f["collections"]
+        return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
+                f"store={c.get('store_counts')}")
     if "answer" in f:                                   # ReAct / Q&A capability — its text IS the answer
         return _answer_text(f)
     if "decision" in f:
