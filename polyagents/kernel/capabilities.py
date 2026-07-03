@@ -186,14 +186,24 @@ def recommend_markets_capability(recommend_fn: Callable) -> Capability:
 
     ``recommend_fn(candidates) -> dict`` runs the analysis core (p_true / edge /
     action) on the top candidates, ranks by opportunity, and returns the pick plus
-    the ranked shortlist. Reuses the same engine analysis that powers analyze_market."""
+    the ranked shortlist. Reuses the same engine analysis that powers analyze_market.
+
+    Also emits ``market_ref`` for the top pick, so a follow-up ``analyze_market``
+    deep-dives THAT exact market (no re-resolve from the topic)."""
     def run(ctx: Context) -> dict:
-        return {"recommendation": recommend_fn(ctx.facts["candidates"])}
+        rec = recommend_fn(ctx.facts["candidates"])
+        out = {"recommendation": rec}
+        pick = rec.get("top_pick") if isinstance(rec, dict) else None
+        if pick and pick.get("token_id"):               # hand the pick to analyze_market by token
+            out["market_ref"] = {"token_id": pick["token_id"],
+                                 "question": pick.get("question"), "price": pick.get("price")}
+        return out
     return Capability("recommend_markets",
                       "Score the discovered candidate markets (true probability, edge, "
                       "action) and RECOMMEND the best trading target with reasons, plus a "
                       "ranked shortlist. Use after discover_markets for topic → recommendation.",
-                      frozenset({"candidates"}), frozenset({"recommendation"}), run, cost=4)
+                      frozenset({"candidates"}), frozenset({"recommendation", "market_ref"}),
+                      run, cost=4)
 
 
 def strategy_capability(run_strategy_fn: Callable) -> Capability:

@@ -4,7 +4,8 @@ a scripted fake LLM (no network); capabilities use injected fakes."""
 from __future__ import annotations
 
 from polyagents.kernel.controller import KernelController
-from polyagents.kernel.capabilities import (discover_markets_capability,
+from polyagents.kernel.capabilities import (analyze_market_capability,
+                                             discover_markets_capability,
                                              recommend_markets_capability)
 
 
@@ -50,6 +51,25 @@ def test_topic_discovers_then_recommends():
     assert rec["top_pick"]["token_id"] == "t1"          # actionable buy ranked first
     assert rec["n_scored"] == 2
     assert captured["candidates"]["count"] == 2         # candidates flowed from discover
+    assert res.facts["market_ref"]["token_id"] == "t1"  # top pick handed off for analyze_market
+
+
+def test_analyze_deep_dives_the_recommended_pick_not_a_re_resolve():
+    captured: dict = {}
+
+    def analyze(ref):
+        captured["analyzed_token"] = ref.get("token_id")
+        return {"market": {"token_id": ref.get("token_id")}, "reasoning": {},
+                "microstructure": {}, "backtest": {}, "similar_markets": [], "conclusion": {}}
+
+    reg = _registry(captured) + [analyze_market_capability(analyze)]
+    llm = FakeLLM('{"action":"call","capability":"discover_markets"}',
+                  '{"action":"call","capability":"recommend_markets"}',
+                  '{"action":"call","capability":"analyze_market"}',
+                  '{"action":"final","answer":"done"}')
+    res = KernelController(reg, llm).run("世界杯热点,推荐并分析")
+    assert [s.capability for s in res.trace] == ["discover_markets", "recommend_markets", "analyze_market"]
+    assert captured["analyzed_token"] == "t1"           # analyzed the RECOMMENDED pick, by token
 
 
 def test_recommend_hidden_until_discover_ran():
