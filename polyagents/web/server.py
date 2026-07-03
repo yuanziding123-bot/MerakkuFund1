@@ -578,6 +578,29 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_strategy_comparison(c: dict, path: str) -> str:
+    """Render the multi-strategy backtest comparison over a domain's resolved markets."""
+    strats = c.get("strategies") or []
+    lines = [f"**策略对比回测** · {path}", "",
+             f"**领域**:{c.get('domain')} · 已结算市场 {c.get('n_markets')} 个"]
+    if not strats:
+        lines.append("\n" + (c.get("note") or "该领域没有足够的已结算市场可回测,换个领域再试。"))
+        return "\n".join(lines)
+    lines.append("\n| 策略 | brier_delta | 跑赢市场 | 95% CI |")
+    lines.append("|---|---|---|---|")
+    for s in strats:
+        win = "✅" if s.get("beats_market") else "❌"
+        lo, hi = (s.get("ci") or [0.0, 0.0])[:2]
+        lines.append(f"| {s['name']} | {s['brier_delta']:+.4f} | {win} | [{lo:+.4f}, {hi:+.4f}] |")
+    best = c.get("best")
+    if best:
+        tail = "——跑赢市场 ✅" if best.get("beats_market") else "——但仍未跑赢市场,无 alpha。"
+        lines.append(f"\n**最优**:{best['name']}(brier_delta={best['brier_delta']:+.4f}){tail}")
+    lines.append("\n_注:brier_delta 正=跑赢市场(模型 Brier 更低);naive=直接信市场价的基准(≈0),"
+                 "任何策略要证明有效,得稳定地做到正 delta 且 CI 不含 0。_")
+    return "\n".join(lines)
+
+
 def _format_recommendation(r: dict, path: str) -> str:
     """Render the Goal-2 result: topic → ranked candidates → recommended target."""
     ranked = r.get("ranked") or []
@@ -628,6 +651,8 @@ def _kernel_summary(ctx) -> str:
         c = f["collections"]
         return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
                 f"store={c.get('store_counts')}")
+    if "strategy_comparison" in f:                       # multi-strategy backtest comparison
+        return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:
         r = f["backtest_report"]
         return (f"**kernel** {path}\n\n回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "

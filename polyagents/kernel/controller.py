@@ -32,6 +32,8 @@ _SYS = (
     "domain_answer) when a specialized capability fits. Chain steps when one produces what "
     "the next needs (e.g. scan_markets → batch_collect, resolve_market → analyze_market, "
     "discover_markets → recommend_markets).\n"
+    "'Backtest a signal / one strategy over a domain' → batch_backtest. 'Compare / backtest "
+    "the (multiple) strategies for a domain', 'which strategy works' → backtest_strategies.\n"
     "A THEME / event / hot topic with 'recommend a market to bet on' goes through "
     "discover_markets → recommend_markets; a SPECIFIC named market goes through "
     "resolve_market → analyze_market. After discover_markets you MUST call "

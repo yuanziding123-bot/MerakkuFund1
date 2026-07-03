@@ -132,6 +132,21 @@ def batch_backtest_capability(backtest_fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"backtest_report"}), run, cost=4)
 
 
+def backtest_strategies_capability(fn: Callable) -> Capability:
+    """Backtest SEVERAL strategy signals over a domain's resolved markets and compare.
+
+    ``fn(query) -> dict`` runs each built-in signal (naive, momentum, …) over the
+    domain's resolved markets and returns a comparison (brier_delta / beats_market
+    per strategy) plus the best. Answers 'which strategy works in this domain'."""
+    def run(ctx: Context) -> dict:
+        return {"strategy_comparison": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("backtest_strategies",
+                      "Backtest MULTIPLE strategy signals (naive, momentum, …) over a "
+                      "domain's resolved markets and COMPARE them — which has alpha / beats "
+                      "the market. Use for 'compare / backtest the strategies for <domain>'.",
+                      frozenset({"question"}), frozenset({"strategy_comparison"}), run, cost=4)
+
+
 def resolve_market_capability(resolve_fn: Callable) -> Capability:
     """Resolve the request to ONE concrete market to analyse.
 

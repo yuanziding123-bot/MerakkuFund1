@@ -10,11 +10,12 @@ from __future__ import annotations
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
-                           backtest_capability, batch_backtest_capability,
-                           batch_collect_capability, data_capability,
-                           discover_markets_capability, domain_capability,
-                           recommend_markets_capability, resolve_market_capability,
-                           scan_capability, strategy_capability)
+                           backtest_capability, backtest_strategies_capability,
+                           batch_backtest_capability, batch_collect_capability,
+                           data_capability, discover_markets_capability,
+                           domain_capability, recommend_markets_capability,
+                           resolve_market_capability, scan_capability,
+                           strategy_capability)
 
 
 def _chunk_text(content) -> str:
@@ -55,7 +56,7 @@ def default_registry() -> list:
     keyword category, then replay a deterministic backtest over them."""
     from polyagents import mcp_server
     from polyagents.evaluation.evaluate import categorize
-    from polyagents.lab.backtest import BacktestRunner
+    from polyagents.lab.backtest import BacktestRunner, momentum_signal, naive_signal
 
     eng = mcp_server.engine()
 
@@ -105,6 +106,30 @@ def default_registry() -> list:
     def batch_backtest(query):
         _cat, yes = _resolved_yes(query)
         return _replay(yes, event=query)
+
+    def backtest_strategies(query):
+        """Run every built-in strategy signal over the domain's resolved markets and
+        compare — which (if any) beats the market."""
+        cat, yes = _resolved_yes(query)
+        if not yes:                                     # domain misdetected/empty → all resolved
+            raw = eng.client.list_resolved_markets(limit=80)
+            yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+            cat = f"{cat}→all(no per-domain data)"
+        if not yes:
+            return {"domain": cat, "n_markets": 0, "strategies": [], "best": None,
+                    "note": "no resolved markets to backtest"}
+        strategies = []
+        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
+            out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+                category=None, markets=yes)
+            s = out["summary"]
+            strategies.append({"name": name, "n_markets": out["n_markets"],
+                               "brier_delta": s.brier_delta, "beats_market": s.beats_market,
+                               "ci": list(s.brier_delta_ci)})
+        strategies.sort(key=lambda x: x["brier_delta"], reverse=True)   # best (highest delta) first
+        n = max((s["n_markets"] for s in strategies), default=0)
+        return {"domain": cat, "n_markets": n, "strategies": strategies,
+                "best": strategies[0] if strategies else None}
 
     # ----- Goal 1: single-target analysis framework --------------------------
     #   resolve_market -> analyze_market
@@ -303,6 +328,7 @@ def default_registry() -> list:
         scan_capability(scan),
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
+        backtest_strategies_capability(backtest_strategies),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
         discover_markets_capability(discover),
