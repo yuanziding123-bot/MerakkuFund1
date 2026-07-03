@@ -245,3 +245,51 @@ _ASK_PREAMBLE = (
     "or backtested it yourself. Ground claims in tool results; cite sample size and "
     "confidence intervals when you report evaluation numbers."
 )
+
+
+# ----- general handler (open-ended / coding / external questions) ------------
+
+def web_search(query: str) -> str:
+    """Search the web for general / open-ended questions (Tavily). READ-ONLY.
+
+    Use for current events, external facts, or anything outside the user's own
+    prediction markets. Degrades gracefully to general knowledge if no API key.
+    """
+    key = DEFAULT_CONFIG.get("tavily_api_key")
+    if not key:
+        return "(web search unavailable: no TAVILY_API_KEY — answer from general knowledge.)"
+    try:
+        from tavily import TavilyClient
+
+        res = TavilyClient(api_key=key).search(query, max_results=5)
+        items = res.get("results", []) if isinstance(res, dict) else []
+        if not items:
+            return "(no web results.)"
+        return "\n".join(
+            f"- {it.get('title', '')}: {(it.get('content') or '')[:200]} ({it.get('url', '')})"
+            for it in items[:5])
+    except Exception as exc:
+        return f"(web search failed: {exc})"
+
+
+_GENERAL_PREAMBLE = (
+    "You are in ASK mode (read-only): you never trade or modify anything. You are a "
+    "general research assistant for OPEN-ENDED questions — explanations, concepts, "
+    "coding, translation, and external information. Use `web_search` for current "
+    "events or facts outside the user's prediction markets; otherwise answer "
+    "directly. If the question is actually about the user's markets / data / "
+    "evaluation, note that Domain mode handles that better."
+)
+
+
+def build_general_agent(model: str | None = None, llm=None):
+    """The General answer mode: Claude + web_search only (no domain tools)."""
+    from langgraph.prebuilt import create_react_agent
+
+    if llm is None:
+        from langchain_anthropic import ChatAnthropic
+
+        llm = ChatAnthropic(model=resolve_model(model),
+                            temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0))
+    tools = [StructuredTool.from_function(web_search)]
+    return create_react_agent(llm, tools, prompt=_GENERAL_PREAMBLE)

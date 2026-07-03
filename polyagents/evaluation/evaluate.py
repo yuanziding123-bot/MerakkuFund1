@@ -37,6 +37,10 @@ def _score_group(records: list[dict]) -> dict:
     raw = [float(r.get("raw_p_true") if r.get("raw_p_true") is not None else r.get("p_true")) for r in records]
     market = [float(r.get("market_price")) for r in records]
     model_brier, market_brier = brier_score(model, y), brier_score(market, y)
+    # bootstrap CI on the Brier delta (model − market; negative = model better).
+    # Lazy import to avoid the evaluate↔alpha module cycle.
+    from .alpha import bootstrap_brier_delta_ci
+    ci = bootstrap_brier_delta_ci(model, market, y) if len(y) >= 2 else (0.0, 0.0)
     return {
         "n": len(records),
         "hit_rate": sum(y) / len(y),
@@ -44,7 +48,11 @@ def _score_group(records: list[dict]) -> dict:
         "raw_brier": brier_score(raw, y),
         "market_brier": market_brier,
         "brier_skill_vs_market": (1 - model_brier / market_brier) if market_brier else 0.0,
-        "beats_market": model_brier < market_brier,
+        "beats_market": model_brier < market_brier,           # point estimate
+        "brier_delta": model_brier - market_brier,
+        "brier_delta_ci": ci,                                  # bootstrap 95% CI
+        "beats_market_ci": ci[1] < 0,                          # whole CI below 0 = significant
+        "sample_adequate": len(records) >= 30,
         "model_log_loss": log_loss(model, y),
         "market_log_loss": log_loss(market, y),
         "model_ece": ece(model, y),
@@ -74,18 +82,28 @@ def format_report(result: dict) -> str:
     if "overall" not in result:
         return f"No resolved trades to evaluate ({result.get('pending', 0)} pending)."
     o = result["overall"]
-    verdict = "BEATS market ✅" if o["beats_market"] else "does NOT beat market ❌ (edge is likely noise)"
+    if o["beats_market_ci"]:
+        verdict = "BEATS market ✅ (bootstrap 95% CI excludes 0 — significant)"
+    elif o["beats_market"]:
+        verdict = "directionally ahead ⚠ (95% CI includes 0 — NOT significant)"
+    else:
+        verdict = "does NOT beat market ❌ (edge is likely noise)"
+    lo, hi = o["brier_delta_ci"]
+    n_note = "" if o["sample_adequate"] else "  ⚠ sample < 30, preliminary"
     lines = [
-        f"Evaluation — {o['n']} resolved predictions",
+        f"Evaluation — {o['n']} resolved predictions{n_note}",
         f"  model {verdict}",
-        f"  Brier: model {o['model_brier']:.3f}  vs  market {o['market_brier']:.3f}  "
-        f"(skill {o['brier_skill_vs_market']:+.1%})",
+        f"  Brier: model {o['model_brier']:.3f} vs market {o['market_brier']:.3f}  "
+        f"(delta {o['brier_delta']:+.3f}, bootstrap 95% CI [{lo:+.3f}, {hi:+.3f}])",
         f"  raw-model Brier {o['raw_brier']:.3f}  (calibration {'helped' if o['model_brier'] <= o['raw_brier'] else 'hurt'})",
         f"  log-loss: model {o['model_log_loss']:.3f} vs market {o['market_log_loss']:.3f}",
         f"  calibration error (ECE): {o['model_ece']:.3f}  |  hit rate {o['hit_rate']:.0%}",
-        "  by category:",
+        "  by category (n · Brier delta · 95% CI):",
     ]
     for cat, s in result["by_category"].items():
-        flag = "✅" if s["beats_market"] else "❌"
-        lines.append(f"    {cat:12} n={s['n']:<3} Brier {s['model_brier']:.3f} vs mkt {s['market_brier']:.3f} {flag}")
+        clo, chi = s["brier_delta_ci"]
+        flag = "✅" if s["beats_market_ci"] else ("⚠" if s["beats_market"] else "❌")
+        adq = "" if s["sample_adequate"] else " (n<30)"
+        lines.append(f"    {cat:12} n={s['n']:<3} delta {s['brier_delta']:+.3f} "
+                     f"CI [{clo:+.3f}, {chi:+.3f}] {flag}{adq}")
     return "\n".join(lines)

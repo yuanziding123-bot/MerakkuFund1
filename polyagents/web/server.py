@@ -38,8 +38,24 @@ from polyagents.storage.db import DataStore
 
 from polyagents.runtime.session import AgentSession
 
-from .agent import build_agent, list_mcp_servers, list_skills
+from .agent import build_agent, build_general_agent, list_mcp_servers, list_skills
+from .general_backend import chosen_general_backend, stream_devbox_general
+from .router import classify
 from .uploads import UploadCache, build_message_content, extract, public_view
+
+_CLASSIFIER_LLM = None
+
+
+def _classifier_llm():
+    """Cheap Haiku classifier for ambiguous questions (built once, lazily)."""
+    global _CLASSIFIER_LLM
+    if _CLASSIFIER_LLM is None:
+        try:
+            from langchain_anthropic import ChatAnthropic
+            _CLASSIFIER_LLM = ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0.0)
+        except Exception:
+            _CLASSIFIER_LLM = False        # unavailable → classify falls back to 'domain'
+    return _CLASSIFIER_LLM or None
 
 _REPO = str(Path(__file__).resolve().parents[2])
 
@@ -507,15 +523,134 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     return JSONResponse({"files": out})
 
 
+def _kernel_summary(ctx) -> str:
+    """Render a kernel Context into a readable answer for the chat bubble."""
+    f = ctx.facts
+    path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
+    if "answer" in f:                                   # ReAct capability — its text IS the answer
+        body = f["answer"]
+        if isinstance(body, list):
+            body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
+        return str(body)
+    if "backtest_report" in f:
+        r = f["backtest_report"]
+        return (f"**kernel** {path}\n\n"
+                f"回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
+                f"brier_delta={r.get('brier_delta')} · beats_market={r.get('beats_market')} · "
+                f"ci={r.get('ci')}")
+    if "decision" in f:
+        return f"**kernel** {path}\n\ndecision: {f['decision']}"
+    if "evaluation" in f:
+        return f"**kernel** {path}\n\nevaluation: {f['evaluation']}"
+    return f"**kernel** 无法完成目标 {sorted(ctx.goal.targets)}(路径: {path})。"
+
+
+async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncIterator[str]:
+    """Kernel mode: the request goes through the ONE kernel loop, which recognises
+    intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
+    …). The prior turns are passed as cross-turn memory. Runs the sync loop in a
+    thread and bridges its ``on_event`` to SSE."""
+    from polyagents.kernel import run_mode
+
+    # split the conversation into the current request + the prior turns (memory)
+    last_idx = next((i for i in range(len(history) - 1, -1, -1)
+                     if history[i].get("role") == "user"), None)
+    last_text = str(history[last_idx].get("content", "")) if last_idx is not None else ""
+    prior = [(m.get("role"), str(m.get("content", "")))
+             for m in history[:last_idx]] if last_idx is not None else []
+
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def on_event(ev: dict) -> None:
+        loop.call_soon_threadsafe(q.put_nowait, ev)
+
+    def work() -> None:
+        try:
+            ctx = run_mode("kernel", request=last_text, history=prior, on_event=on_event)
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
+        except Exception as exc:                        # surface, don't crash the stream
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
+
+    fut = loop.run_in_executor(None, work)
+    session.log("route.decided", route="kernel", by="manual")
+    yield _sse({"type": "route", "route": "kernel", "by": "manual"})
+    streamed = False                                    # did any real token flow out?
+    while True:
+        ev = await q.get()
+        t = ev.get("type")
+        if t == "token":                                # inner capability tokens — real streaming
+            streamed = True
+            yield _sse({"type": "token", "text": ev.get("text", "")})
+        elif t in ("tool", "tool_result"):              # inner tool-calls (e.g. web_search)
+            yield _sse(ev)
+        elif t == "capability.start":
+            session.log("kernel.capability", name=ev.get("name"))
+            yield _sse({"type": "tool", "name": ev.get("name")})
+        elif t == "capability.done":
+            yield _sse({"type": "tool_result", "name": ev.get("name")})
+        elif t == "capability.error":
+            yield _sse({"type": "error", "message": f"{ev.get('name')}: {ev.get('error')}"})
+        elif t == "_result":
+            if not streamed:                            # nothing streamed → emit the summary/answer
+                for chunk in _chunk_text(_kernel_summary(ev["ctx"])):
+                    yield _sse({"type": "token", "text": chunk})
+            break
+        elif t == "_error":
+            yield _sse({"type": "error", "message": ev["message"]})
+            break
+        # loop.start / loop.end are informational — path shows in the summary
+    await fut
+    session.log("session.end")
+    yield _sse({"type": "done"})
+
+
+def _chunk_text(text: str, size: int = 24):
+    for i in range(0, len(text), size):
+        yield text[i:i + size]
+
+
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
-                  attachments: list[str] | None = None) -> AsyncIterator[str]:
+                  attachments: list[str] | None = None,
+                  mode: str = "auto") -> AsyncIterator[str]:
     # The web chat IS the Ask mode: one session decides tools (read-only),
     # permissions and audit. mode → readonly tool subset + audit trail (§八-B/§九).
     session = AgentSession("ask", audit=_audit())
+    # route the question to a Domain (tools) or General (web_search) handler
+    last_text = next((str(m.get("content", "")) for m in reversed(history)
+                      if m.get("role") == "user"), "")
+    # Kernel mode: one goal-directed loop auto-recognises intent + picks the path,
+    # with the prior turns as cross-turn memory.
+    if mode == "kernel":
+        session.log("session.start", model=model, skills=skills,
+                    attachments=len(attachments or []))
+        async for ev in _stream_kernel(history, session):
+            yield ev
+        return
+    route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
+                         llm=_classifier_llm())
     session.log("session.start", model=model, skills=skills,
                 attachments=len(attachments or []))
+    session.log("route.decided", route=route, by=by)
+    yield _sse({"type": "route", "route": route, "by": by})
+    # General mode may delegate to an external coding agent (Alpha DevBox / pi);
+    # it streams its own SSE which we relay. Falls back to Claude when unconfigured.
+    if route == "general" and chosen_general_backend() == "devbox":
+        session.log("general.backend", backend="devbox")
+        try:
+            async for ev in stream_devbox_general(last_text):
+                yield _sse(ev)
+            session.log("session.end")
+            yield _sse({"type": "done"})
+        except Exception as exc:
+            session.log("session.error", message=str(exc))
+            yield _sse({"type": "error", "message": str(exc)})
+        return
     try:
-        agent = build_agent(skills or None, model=model, readonly=session.readonly)
+        if route == "general":
+            agent = build_general_agent(model=model)
+        else:
+            agent = build_agent(skills or None, model=model, readonly=session.readonly)
     except Exception as exc:
         session.log("session.error", message=str(exc))
         yield _sse({"type": "error", "message": f"agent init failed: {exc}"})
@@ -551,5 +686,6 @@ async def chat(request: Request) -> StreamingResponse:
     skills = body.get("skills", [])
     model = body.get("model")
     attachments = body.get("attachments", [])
-    return StreamingResponse(_stream(history, skills, model, attachments),
+    mode = body.get("mode", "auto")
+    return StreamingResponse(_stream(history, skills, model, attachments, mode),
                              media_type="text/event-stream")
