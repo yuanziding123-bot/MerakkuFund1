@@ -1162,6 +1162,25 @@ function labMetric(m, key, fallback='—'){
   const v=m && m[key];
   return (typeof v === 'number') ? v.toFixed(3) : (v ?? fallback);
 }
+async function labFetchJson(url, options){
+  let response;
+  try{
+    response = await fetch(url, options);
+  }catch(e){
+    throw new Error(`Lab API 无法连接：${location.origin}${url}。请确认 web 服务正在运行并刷新页面。(${e.message||e})`);
+  }
+  let data;
+  try{
+    data = await response.json();
+  }catch(e){
+    throw new Error(`Lab API 返回了非 JSON 响应：HTTP ${response.status}`);
+  }
+  if(!response.ok || (data && data.error)){
+    const msg = data && data.error ? (data.error.message || data.error) : `HTTP ${response.status}`;
+    throw new Error(`Lab API 请求失败：${msg}`);
+  }
+  return data;
+}
 function labLatestReport(id){
   const detail = labDetails[id] || {};
   const reports = detail.reports || [];
@@ -1169,8 +1188,7 @@ function labLatestReport(id){
 }
 async function loadLabHypos(){
   try{
-    const r = await (await fetch('/api/lab/hypotheses')).json();
-    if(r.error) throw new Error(r.error.message || r.error);
+    const r = await labFetchJson('/api/lab/hypotheses');
     labHypos = r.items || [];
     renderLabList(); renderLabTable(); renderLabMetrics();
     if(labHypos.length){ selectLabHypo((labHypos.find(h=>h.id===labSelId)||labHypos[0]).id); }
@@ -1179,7 +1197,11 @@ async function loadLabHypos(){
       document.getElementById('labGates').innerHTML=''; document.getElementById('labLineage').innerHTML='<div class="hist">—</div>';
       document.getElementById('labSelId').textContent='—'; document.getElementById('labSelState').textContent='';
     }
-  }catch(e){ document.getElementById('labHypoBody').innerHTML='<tr><td colspan="8" class="hist">failed to load</td></tr>'; }
+  }catch(e){
+    const msg=esc(e.message||e);
+    document.getElementById('labHypoBody').innerHTML=`<tr><td colspan="8" class="hist">failed to load · ${msg}</td></tr>`;
+    const el=document.getElementById('convList'); if(el && curView==='lab') el.innerHTML=`<div class="hgroup">Hypotheses</div><div class="hist">Lab API 暂时不可用：${msg}</div>`;
+  }
 }
 function renderLabList(){
   const el=document.getElementById('convList'); if(!el || curView!=='lab') return;
@@ -1201,8 +1223,7 @@ async function selectLabHypo(id){
   const bs=document.getElementById('btSlice'); if(bs) bs.textContent='· slice: '+cat;
   renderLabGates(h); renderLabDetail(h); renderLabLineage(h);
   try{
-    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id))).json();
-    if(r.error) throw new Error(r.error.message || r.error);
+    const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id));
     labDetails[id]=r;
     renderLabMetrics(); renderLabTable();
     renderLabGates(r.hypothesis || h); renderLabDetail(r.hypothesis || h); renderLabLineage(r.hypothesis || h);
@@ -1303,11 +1324,10 @@ async function submitLabHypothesis(){
     .split(',').map(s=>s.trim()).filter(Boolean);
   const btn=document.getElementById('labCreateSubmit'); btn.disabled=true; btn.textContent='creating…';
   try{
-    const r=await (await fetch('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await labFetchJson('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
         prompt_version:'signal-v1', model_version:'claude-sonnet-4',
-        lineage:{source:'manual:web', parents:[]}})})).json();
-    if(r.error){ alert(r.error.message || r.error); return; }
+        lineage:{source:'manual:web', parents:[]}})});
     labSelId=r.id;
     document.getElementById('labNewStatement').value='';
     hideLabCreate();
@@ -1328,23 +1348,20 @@ async function runLabBacktest(id){
     const body={time_window:defaultLabWindow(), market_filter:{category:(h&&h.category_filter)||'crypto', settled_only:true},
       model_version:(h&&h.model_version)||'claude-sonnet-4', prompt_version:(h&&h.prompt_version)||'signal-v1',
       calibrator_id:'shrink-to-market-v1', pit_strict:true, max_markets:100};
-    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)})).json();
-    if(r.error){ throw new Error(r.error.message || r.error); }
-    const report=await (await fetch('/api/lab/reports/'+encodeURIComponent(r.report_id))).json();
-    if(report.error){ throw new Error(report.error.message || report.error); }
+    const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    const report=await labFetchJson('/api/lab/reports/'+encodeURIComponent(r.report_id));
     labReports[report.id]=report;
     await selectLabHypo(id);
     renderLabReport(report);
-  }catch(e){ alert(e); }
+  }catch(e){ alert(e.message||e); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Run evidence backtest'; } }
 }
 async function openLabReport(id){
   try{
-    const report=labReports[id] || await (await fetch('/api/lab/reports/'+encodeURIComponent(id))).json();
-    if(report.error){ throw new Error(report.error.message || report.error); }
+    const report=labReports[id] || await labFetchJson('/api/lab/reports/'+encodeURIComponent(id));
     labReports[id]=report; renderLabReport(report);
-  }catch(e){ alert(e); }
+  }catch(e){ alert(e.message||e); }
 }
 function renderLabReport(rep){
   const m=rep.metrics||{};
