@@ -7,15 +7,46 @@ the production wiring). Needs network / ANTHROPIC_API_KEY at run time.
 """
 from __future__ import annotations
 
+import math
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
                            backtest_capability, backtest_strategies_capability,
                            batch_backtest_capability, batch_collect_capability,
-                           data_capability, discover_markets_capability,
-                           domain_capability, recommend_markets_capability,
-                           resolve_market_capability, scan_capability,
-                           strategy_capability)
+                           crypto_arb_capability, data_capability,
+                           discover_markets_capability, domain_capability,
+                           recommend_markets_capability, resolve_market_capability,
+                           scan_capability, strategy_capability)
+
+
+def _norm_cdf(x: float) -> float:
+    """Standard-normal CDF via erf — for the lognormal crypto-arb probability."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+_CX_ASSETS = {"btc": "BTC", "bitcoin": "BTC", "eth": "ETH", "ethereum": "ETH",
+              "sol": "SOL", "solana": "SOL", "xrp": "XRP", "doge": "DOGE",
+              "dogecoin": "DOGE", "bnb": "BNB", "ada": "ADA", "cardano": "ADA"}
+
+
+def parse_crypto_market(question: str) -> dict | None:
+    """Parse a crypto threshold market → {asset, strike, direction}, or None.
+
+    Handles 'Will BTC be above $110k …', '$2,500', 'ETH below 3000', etc."""
+    q = (question or "").lower()
+    asset = next((v for k, v in _CX_ASSETS.items() if re.search(rf"\b{k}\b", q)), None)
+    if not asset:
+        return None
+    m = re.search(r"\$\s*([\d][\d,]*\.?\d*)\s*([kmb])?", q) \
+        or re.search(r"\b([\d][\d,]*\.?\d*)\s*([kmb])\b", q)   # $-anchored, else number+suffix
+    if not m:
+        return None
+    strike = float(m.group(1).replace(",", "")) * {"k": 1e3, "m": 1e6, "b": 1e9}.get(m.group(2), 1.0)
+    # downward move (dip/drop/fall/below) resolves YES if price goes down to the strike;
+    # everything else (reach/hit/above/over/exceed) is an upward threshold.
+    down = re.search(r"\b(dip|drop|fall|below|under|less than|down to)\b|<", q)
+    direction = "below" if down else "above"
+    return {"asset": asset, "strike": strike, "direction": direction}
 
 
 def _chunk_text(content) -> str:
@@ -106,6 +137,63 @@ def default_registry() -> list:
     def batch_backtest(query):
         _cat, yes = _resolved_yes(query)
         return _replay(yes, event=query)
+
+    # ----- cross-market crypto arbitrage (spot vs implied probability) -------
+
+    _cx_vol: dict = {}                                   # per-request daily-vol cache
+
+    def _daily_vol(cx, asset):
+        if asset in _cx_vol:
+            return _cx_vol[asset]
+        closes = (cx.crypto_klines(asset, interval="1d", limit=30) or {}).get("closes")
+        if closes and len(closes) > 2:
+            rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0]
+            mean = sum(rets) / len(rets)
+            sig = math.sqrt(sum((x - mean) ** 2 for x in rets) / len(rets))
+        else:
+            sig = 0.03                                   # ~3%/day fallback for crypto
+        _cx_vol[asset] = sig
+        return sig
+
+    def find_crypto_arb(query, cap=8, universe=400):
+        """Scan crypto threshold markets, estimate YES prob from spot+vol, rank mispricings.
+
+        Pulls a large active-market universe directly (crypto threshold markets are
+        often not top-by-volume, so the volume-capped scan would miss them)."""
+        from polyagents.mcp_servers import crypto as cx
+        by_cond = {}                                     # dedup by market, keep the YES side
+        for m in eng.client.to_markets(eng.client.list_active_markets(limit=universe)):
+            parsed = parse_crypto_market(m.question)
+            if not parsed:
+                continue
+            if m.condition_id not in by_cond or m.outcome == "YES":
+                by_cond[m.condition_id] = (m, parsed)
+        spot: dict = {}
+        opps = []
+        for m, parsed in by_cond.values():
+            asset, K = parsed["asset"], parsed["strike"]
+            if asset not in spot:
+                sp = cx.crypto_price(asset)
+                spot[asset] = sp.get("price") if isinstance(sp, dict) and "error" not in sp else None
+            S = spot[asset]
+            if not S or K <= 0:
+                continue
+            T = max(float(m.days_to_expiry or 0.0), 0.0)
+            sig_h = _daily_vol(cx, asset) * math.sqrt(T) if T > 0 else 0.0
+            if sig_h <= 0:
+                p_above = 1.0 if S > K else 0.0
+            else:
+                p_above = _norm_cdf(math.log(S / K) / sig_h)   # zero-drift lognormal
+            p_yes = min(0.99, max(0.01, p_above if parsed["direction"] == "above" else 1.0 - p_above))
+            price = float(m.price or 0.0)
+            opps.append({"question": m.question, "token_id": m.token_id,
+                         "asset": asset, "strike": K, "direction": parsed["direction"],
+                         "spot": round(float(S), 2), "days": round(T, 1), "p_model": round(p_yes, 3),
+                         "market_price": round(price, 3), "gap": round(p_yes - price, 3)})
+        opps.sort(key=lambda o: abs(o["gap"]), reverse=True)
+        opps = opps[:cap]
+        return {"query": query, "n": len(opps), "opportunities": opps,
+                "best": opps[0] if opps else None}
 
     def backtest_strategies(query):
         """Run every built-in strategy signal over the domain's resolved markets and
@@ -329,6 +417,7 @@ def default_registry() -> list:
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
         backtest_strategies_capability(backtest_strategies),
+        crypto_arb_capability(find_crypto_arb),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
         discover_markets_capability(discover),

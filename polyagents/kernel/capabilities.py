@@ -132,6 +132,23 @@ def batch_backtest_capability(backtest_fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"backtest_report"}), run, cost=4)
 
 
+def crypto_arb_capability(fn: Callable) -> Capability:
+    """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
+
+    ``fn(query) -> dict`` scans crypto threshold markets ('Will BTC be above $X?'),
+    estimates each YES probability from the live exchange spot + volatility, compares
+    to the market's implied price, and ranks the mispricings. This is the one genuine
+    alpha strategy wired into the loop."""
+    def run(ctx: Context) -> dict:
+        return {"crypto_arb": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("find_crypto_arb",
+                      "Find mispriced / lagging Polymarket CRYPTO markets ('Will BTC be "
+                      "above $X?') by comparing the live exchange SPOT price + volatility to "
+                      "the market's implied probability. Use for crypto arbitrage, 'find "
+                      "mispriced crypto markets', or hunting valuable trading opportunities.",
+                      frozenset({"question"}), frozenset({"crypto_arb"}), run, cost=3)
+
+
 def backtest_strategies_capability(fn: Callable) -> Capability:
     """Backtest SEVERAL strategy signals over a domain's resolved markets and compare.
 

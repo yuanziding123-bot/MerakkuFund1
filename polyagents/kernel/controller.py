@@ -34,6 +34,8 @@ _SYS = (
     "discover_markets → recommend_markets).\n"
     "'Backtest a signal / one strategy over a domain' → batch_backtest. 'Compare / backtest "
     "the (multiple) strategies for a domain', 'which strategy works' → backtest_strategies.\n"
+    "'Find mispriced crypto markets', crypto arbitrage, 'Will BTC be above $X', hunting "
+    "trading opportunities in crypto → find_crypto_arb.\n"
     "A THEME / event / hot topic with 'recommend a market to bet on' goes through "
     "discover_markets → recommend_markets; a SPECIFIC named market goes through "
     "resolve_market → analyze_market. After discover_markets you MUST call "
