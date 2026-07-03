@@ -1,109 +1,99 @@
-"""SQLite persistence for the 5 financial objects + their promotion events.
+"""Persistence for the 5 financial objects + their promotion events.
 
 Per the v0.2 design (§九) objects live in ONE table with a JSON payload — not the
-17 tables of v0.1. Common fields are columns (so we can query by type/state);
-everything type-specific rides in ``payload_json``. Promotions are appended to a
-separate audit table so every state change is recoverable.
-
-Stdlib ``sqlite3`` only, same shape as :class:`polyagents.storage.db.DataStore`.
+17 tables of v0.1. Backed by SQLAlchemy Core so the same code runs on SQLite
+(dev/tests) and the shared cloud PostgreSQL (prod). Table names come from the
+``aihf_`` registry in :mod:`polyagents.storage.tables` — never hard-coded here.
 """
 from __future__ import annotations
 
 import json
-import sqlite3
-from pathlib import Path
+from datetime import datetime, timezone
+
+from sqlalchemy import delete, func, insert, select
 
 from polyagents.objects import FO, from_dict, promote, to_dict
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS objects (
-    id TEXT PRIMARY KEY,
-    type TEXT, version INTEGER, state TEXT, owner TEXT,
-    snapshot_id TEXT, created_at TEXT, updated_at TEXT,
-    payload_json TEXT
-);
-CREATE INDEX IF NOT EXISTS objects_type_state ON objects (type, state);
-CREATE TABLE IF NOT EXISTS promotion_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id TEXT, from_state TEXT, to_state TEXT,
-    promoted_by TEXT, evidence_ref TEXT, promoted_at TEXT
-);
-"""
+from .engine import coerce_url, get_engine, make_engine
+from .tables import metadata, objects, promotion_events
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class ObjectStore:
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(_SCHEMA)
-        self.conn.commit()
+    def __init__(self, url_or_path: str | None = None, *, engine=None) -> None:
+        # url_or_path: None → shared app engine (prod Postgres / dev SQLite);
+        # ":memory:" / a file path / a URL → a fresh engine (tests / explicit).
+        if engine is not None:
+            self.engine = engine
+        elif url_or_path is None:
+            self.engine = get_engine()
+        else:
+            self.engine = make_engine(coerce_url(url_or_path))
+        metadata.create_all(self.engine, tables=[objects, promotion_events])
 
     def close(self) -> None:
-        self.conn.close()
+        self.engine.dispose()
 
     # ----- CRUD --------------------------------------------------------------
 
     def save(self, fo: FO) -> FO:
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
-        self.conn.execute(
-            "INSERT OR REPLACE INTO objects VALUES (?,?,?,?,?,?,?,?,?)",
-            (fo.id, fo.type, fo.version, fo.state, fo.owner, fo.snapshot_id,
-             fo.created_at, now, json.dumps(to_dict(fo), ensure_ascii=False)),
-        )
-        self.conn.commit()
+        row = {
+            "id": fo.id, "type": fo.type, "version": fo.version, "state": fo.state,
+            "owner": fo.owner, "snapshot_id": fo.snapshot_id, "created_at": fo.created_at,
+            "updated_at": _now(), "payload_json": json.dumps(to_dict(fo), ensure_ascii=False),
+        }
+        with self.engine.begin() as cx:                  # upsert by id: delete then insert (portable)
+            cx.execute(delete(objects).where(objects.c.id == fo.id))
+            cx.execute(insert(objects).values(**row))
         return fo
 
     def get(self, object_id: str) -> FO | None:
-        r = self.conn.execute("SELECT payload_json FROM objects WHERE id=?",
-                              (object_id,)).fetchone()
-        return from_dict(json.loads(r["payload_json"])) if r else None
+        with self.engine.connect() as cx:
+            r = cx.execute(
+                select(objects.c.payload_json).where(objects.c.id == object_id)
+            ).fetchone()
+        return from_dict(json.loads(r[0])) if r else None
 
     def list(self, type: str | None = None, state: str | None = None) -> list[FO]:
-        q = "SELECT payload_json FROM objects"
-        clauses, args = [], []
+        q = select(objects.c.payload_json)
         if type:
-            clauses.append("type=?"); args.append(type)
+            q = q.where(objects.c.type == type)
         if state:
-            clauses.append("state=?"); args.append(state)
-        if clauses:
-            q += " WHERE " + " AND ".join(clauses)
-        q += " ORDER BY updated_at DESC"
-        return [from_dict(json.loads(r["payload_json"]))
-                for r in self.conn.execute(q, args).fetchall()]
+            q = q.where(objects.c.state == state)
+        q = q.order_by(objects.c.updated_at.desc())
+        with self.engine.connect() as cx:
+            rows = cx.execute(q).fetchall()
+        return [from_dict(json.loads(r[0])) for r in rows]
 
     # ----- promotion (state change + audit) ----------------------------------
 
     def promote(self, object_id: str, to_state: str, *, promoted_by: str,
                 evidence_ref: str | None = None) -> FO:
-        """Load, advance one legal edge, persist the new version, and audit it."""
         fo = self.get(object_id)
         if fo is None:
             raise KeyError(object_id)
         from_state = fo.state
         moved = promote(fo, to_state, promoted_by=promoted_by, evidence_ref=evidence_ref)
         self.save(moved)
-        self.conn.execute(
-            "INSERT INTO promotion_events "
-            "(object_id, from_state, to_state, promoted_by, evidence_ref, promoted_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (object_id, from_state, to_state, promoted_by, evidence_ref,
-             moved.lineage.events[-1].promoted_at),
-        )
-        self.conn.commit()
+        with self.engine.begin() as cx:
+            cx.execute(insert(promotion_events).values(
+                object_id=object_id, from_state=from_state, to_state=to_state,
+                promoted_by=promoted_by, evidence_ref=evidence_ref,
+                promoted_at=moved.lineage.events[-1].promoted_at))
         return moved
 
     def promotions(self, object_id: str) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT from_state, to_state, promoted_by, evidence_ref, promoted_at "
-            "FROM promotion_events WHERE object_id=? ORDER BY id", (object_id,)
-        ).fetchall()
-        return [dict(r) for r in rows]
+        cols = ("from_state", "to_state", "promoted_by", "evidence_ref", "promoted_at")
+        q = (select(*[promotion_events.c[c] for c in cols])
+             .where(promotion_events.c.object_id == object_id)
+             .order_by(promotion_events.c.id))
+        with self.engine.connect() as cx:
+            return [dict(zip(cols, r)) for r in cx.execute(q).fetchall()]
 
     def counts(self) -> dict[str, int]:
-        rows = self.conn.execute(
-            "SELECT type, COUNT(*) c FROM objects GROUP BY type").fetchall()
-        return {r["type"]: r["c"] for r in rows}
+        q = select(objects.c.type, func.count()).group_by(objects.c.type)
+        with self.engine.connect() as cx:
+            return {t: n for t, n in cx.execute(q).fetchall()}

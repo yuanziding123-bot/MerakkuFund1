@@ -313,10 +313,7 @@ def _object_store():
     global _OBJECT_STORE
     if _OBJECT_STORE is None:
         from polyagents.storage.objects_store import ObjectStore
-        db = DEFAULT_CONFIG.get("db_path")
-        path = (Path(db).with_name("objects.db") if db
-                else Path.home() / ".polyagents" / "objects.db")
-        _OBJECT_STORE = ObjectStore(path)
+        _OBJECT_STORE = ObjectStore()        # shared engine (POLYAGENTS_DATABASE_URL → Postgres in prod)
     return _OBJECT_STORE
 
 
@@ -324,10 +321,7 @@ def _audit():
     global _AUDIT_STORE
     if _AUDIT_STORE is None:
         from polyagents.storage.audit_store import AuditStore
-        db = DEFAULT_CONFIG.get("db_path")
-        path = (Path(db).with_name("audit.db") if db
-                else Path.home() / ".polyagents" / "audit.db")
-        _AUDIT_STORE = AuditStore(path)
+        _AUDIT_STORE = AuditStore()
     return _AUDIT_STORE
 
 
