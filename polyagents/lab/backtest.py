@@ -19,12 +19,26 @@ from typing import Callable
 
 from polyagents.evaluation.alpha import alpha_test
 from polyagents.evaluation.evaluate import categorize
-from polyagents.evaluation.report import build_evaluation_summary, promotion_gates
+from polyagents.evaluation.report import build_evaluation_summary, promotion_gates, scorecard
 
 from .pit import assert_point_in_time
 from .repository import LabRepository
 from .schemas import BacktestRequest, BacktestRunResult, ForecastRecord, utc_now
 from .service import default_repository
+
+
+FACTOR_MODEL_V1 = {
+    "id": "linear-factor-v1",
+    "description": "Deterministic factor model over stored collection snapshots.",
+    "intercept": 0.0,
+    "weights": {
+        "sentiment": 0.18,
+        "flow_imbalance": 0.12,
+        "book_pressure": 0.08,
+        "spread_bps": -0.0005,
+        "price_momentum": 0.08,
+    },
+}
 
 
 class PointInTimeError(AssertionError):
@@ -134,15 +148,29 @@ class BacktestRunner:
         started = utc_now()
         run_id = f"bt_{_short_hash(request.hypothesis_id + started)}"
         prediction_time = request.time_window["end"]
-        forecasts = self._forecasts_from_store(request, run_id)
+        forecasts, market_sample, diagnostics = self._forecasts_with_report_rows(request, run_id)
         if not forecasts:
             forecasts = self._fixture_forecasts(request, run_id, prediction_time)
+            market_sample = self._market_sample(forecasts, source="fixture")
+            diagnostics = self._diagnostics(
+                request,
+                source="fixture",
+                fetched=0,
+                eligible=len(forecasts),
+                skipped_by_category=0,
+                skipped_unresolved=0,
+                pit_warnings=[],
+            )
 
+        p_cal = [f.p_cal for f in forecasts]
+        p_market = [f.p_market for f in forecasts]
+        outcomes = [float(f.outcome) for f in forecasts if f.outcome is not None]
         summary = build_evaluation_summary(
-            p_cal=[f.p_cal for f in forecasts],
-            p_market=[f.p_market for f in forecasts],
-            outcomes=[float(f.outcome) for f in forecasts if f.outcome is not None],
+            p_cal=p_cal,
+            p_market=p_market,
+            outcomes=outcomes,
             min_samples=30,
+            pit_clean=not diagnostics["pit_warnings"],
         )
         report_id = f"eval_{_short_hash(run_id + request.hypothesis_id)}"
         report = {
@@ -152,18 +180,22 @@ class BacktestRunner:
             "backtest_run_id": run_id,
             "scope": f"hypothesis:{request.hypothesis_id}",
             "time_window": dict(request.time_window),
+            "backtest_config": {
+                "market_filter": dict(request.market_filter),
+                "max_markets": request.max_markets,
+                "model_version": request.model_version,
+                "prompt_version": request.prompt_version,
+                "calibrator_id": request.calibrator_id,
+                "pit_strict": request.pit_strict,
+                "signal_model_id": FACTOR_MODEL_V1["id"],
+            },
+            "market_universe": diagnostics["market_universe"],
+            "data_quality": diagnostics["data_quality"],
             "metrics": asdict(summary),
+            "scorecard": scorecard(p_cal=p_cal, p_market=p_market, outcomes=outcomes),
             "gates": promotion_gates(summary),
-            "pit_warnings": [],
-            "market_sample": [
-                {
-                    "market_token_id": f.market_token_id,
-                    "p_cal": f.p_cal,
-                    "p_market": f.p_market,
-                    "outcome": f.outcome,
-                }
-                for f in forecasts
-            ],
+            "pit_warnings": diagnostics["pit_warnings"],
+            "market_sample": market_sample,
             "generated_at": utc_now(),
         }
         self.repo.save_forecasts(forecasts)
@@ -181,8 +213,15 @@ class BacktestRunner:
         return result
 
     def _forecasts_from_store(self, request: BacktestRequest, run_id: str) -> list[ForecastRecord]:
+        return self._forecasts_with_report_rows(request, run_id)[0]
+
+    def _forecasts_with_report_rows(
+        self,
+        request: BacktestRequest,
+        run_id: str,
+    ) -> tuple[list[ForecastRecord], list[dict], dict]:
         if not hasattr(self.store, "fetch_collections"):
-            return []
+            return [], [], self._diagnostics(request, source="none", fetched=0)
         rows = self.store.fetch_collections(
             request.time_window["start"],
             request.time_window["end"],
@@ -190,43 +229,80 @@ class BacktestRunner:
         )
         category = request.market_filter.get("category")
         forecasts: list[ForecastRecord] = []
+        market_sample: list[dict] = []
+        pit_warnings: list[dict] = []
+        skipped_by_category = 0
+        skipped_unresolved = 0
         for row in rows:
-            if category and category != "all" and categorize(row.get("question", "")) != category:
+            token = row["token_id"]
+            question = row.get("question", "")
+            if category and category != "all" and categorize(question) != category:
+                skipped_by_category += 1
                 continue
             raw = row.get("raw") or {}
             lab = raw.get("lab") or {}
             outcome = lab.get("outcome", raw.get("outcome"))
             if outcome is None:
+                skipped_unresolved += 1
                 continue
             prediction_time = row.get("as_of") or request.time_window["end"]
             available_at_max = lab.get("available_at_max") or raw.get("available_at_max") or prediction_time
-            assert_point_in_time(
-                [{"feature": "collection", "available_at": available_at_max}],
-                prediction_time,
-                strict=request.pit_strict,
-            )
+            warning = self._pit_warning(token, available_at_max, prediction_time, strict=request.pit_strict)
+            if warning:
+                pit_warnings.append(warning)
+                if request.pit_strict:
+                    continue
             p_market = float(row.get("market_price") or lab.get("p_market") or 0.5)
-            p_raw = float(lab.get("p_raw", self._score_collection(raw, p_market)))
+            model_output = self._score_collection_model(raw, p_market)
+            if "p_raw" in lab:
+                model_output = {
+                    **model_output,
+                    "source": "lab_override",
+                    "p_raw_model": model_output["p_raw"],
+                    "p_raw": float(lab["p_raw"]),
+                }
+            p_raw = float(model_output["p_raw"])
             p_cal = float(lab.get("p_cal", self._calibrate_to_market(p_raw, p_market)))
-            token = row["token_id"]
-            forecasts.append(
-                ForecastRecord(
-                    id=f"fc_{_short_hash(run_id + token + prediction_time)}",
-                    hypothesis_id=request.hypothesis_id,
-                    market_token_id=token,
-                    snapshot_id=f"snap_{_short_hash(token + prediction_time)}",
-                    p_raw=p_raw,
-                    p_cal=p_cal,
-                    p_market=p_market,
-                    outcome=int(outcome),
-                    model_version=request.model_version,
-                    prompt_version=request.prompt_version,
-                    calibrator_id=request.calibrator_id,
-                    prediction_time=prediction_time,
-                    available_at_max=available_at_max,
+            forecast = ForecastRecord(
+                id=f"fc_{_short_hash(run_id + token + prediction_time)}",
+                hypothesis_id=request.hypothesis_id,
+                market_token_id=token,
+                snapshot_id=f"snap_{_short_hash(token + prediction_time)}",
+                p_raw=p_raw,
+                p_cal=p_cal,
+                p_market=p_market,
+                outcome=int(outcome),
+                model_version=request.model_version,
+                prompt_version=request.prompt_version,
+                calibrator_id=request.calibrator_id,
+                prediction_time=prediction_time,
+                available_at_max=available_at_max,
+            )
+            forecasts.append(forecast)
+            market_sample.append(
+                self._market_row(
+                    forecast,
+                    question=question,
+                    source="collections",
+                    signal_model=model_output,
+                    snapshot_manifest=self._snapshot_manifest(
+                        token=token,
+                        row=row,
+                        raw=raw,
+                        prediction_time=prediction_time,
+                        available_at_max=available_at_max,
+                    ),
                 )
             )
-        return forecasts
+        return forecasts, market_sample, self._diagnostics(
+            request,
+            source="collections",
+            fetched=len(rows),
+            eligible=len(forecasts),
+            skipped_by_category=skipped_by_category,
+            skipped_unresolved=skipped_unresolved,
+            pit_warnings=pit_warnings,
+        )
 
     def _fixture_forecasts(
         self,
@@ -264,21 +340,195 @@ class BacktestRunner:
             for token, p_raw, p_cal, p_market, outcome in fixtures
         ]
 
+    def _market_sample(self, forecasts: list[ForecastRecord], *, source: str) -> list[dict]:
+        return [
+            self._market_row(
+                f,
+                question=None,
+                source=source,
+                signal_model=self._fixture_signal_model(f.p_raw, f.p_market),
+                snapshot_manifest={
+                    "token_id": f.market_token_id,
+                    "prediction_time": f.prediction_time,
+                    "available_at_max": f.available_at_max,
+                    "sources": [],
+                    "pit_status": "clean",
+                },
+            )
+            for f in forecasts
+        ]
+
+    @staticmethod
+    def _market_row(
+        forecast: ForecastRecord,
+        *,
+        question: str | None,
+        source: str,
+        signal_model: dict | None = None,
+        snapshot_manifest: dict | None = None,
+    ) -> dict:
+        outcome = float(forecast.outcome) if forecast.outcome is not None else None
+        brier_model = (forecast.p_cal - outcome) ** 2 if outcome is not None else None
+        brier_market = (forecast.p_market - outcome) ** 2 if outcome is not None else None
+        return {
+            "market_token_id": forecast.market_token_id,
+            "question": question,
+            "source": source,
+            "prediction_time": forecast.prediction_time,
+            "available_at_max": forecast.available_at_max,
+            "p_raw": forecast.p_raw,
+            "p_cal": forecast.p_cal,
+            "p_market": forecast.p_market,
+            "outcome": forecast.outcome,
+            "brier_model": brier_model,
+            "brier_market": brier_market,
+            "brier_delta": (brier_market - brier_model) if brier_model is not None else None,
+            "absolute_error_model": abs(forecast.p_cal - outcome) if outcome is not None else None,
+            "absolute_error_market": abs(forecast.p_market - outcome) if outcome is not None else None,
+            "signal_model": signal_model,
+            "snapshot_manifest": snapshot_manifest,
+        }
+
+    @staticmethod
+    def _pit_warning(token: str, available_at: str | None, prediction_time: str, *, strict: bool) -> dict | None:
+        try:
+            assert_point_in_time(
+                [{"feature": "collection", "available_at": available_at}],
+                prediction_time,
+                strict=strict,
+            )
+        except ValueError as exc:
+            return {
+                "market_token_id": token,
+                "feature": "collection",
+                "available_at": available_at,
+                "prediction_time": prediction_time,
+                "message": str(exc),
+            }
+        return None
+
+    @staticmethod
+    def _diagnostics(
+        request: BacktestRequest,
+        *,
+        source: str,
+        fetched: int,
+        eligible: int | None = None,
+        skipped_by_category: int = 0,
+        skipped_unresolved: int = 0,
+        pit_warnings: list[dict] | None = None,
+    ) -> dict:
+        warnings = pit_warnings or []
+        requested = int(request.max_markets)
+        eligible_markets = (
+            eligible
+            if eligible is not None
+            else max(0, fetched - skipped_by_category - skipped_unresolved - len(warnings))
+        )
+        return {
+            "market_universe": {
+                "source": source,
+                "requested_max_markets": requested,
+                "fetched_markets": fetched,
+                "eligible_markets": eligible_markets,
+                "skipped_by_category": skipped_by_category,
+                "skipped_unresolved": skipped_unresolved,
+                "skipped_pit": len(warnings),
+                "category": request.market_filter.get("category"),
+                "settled_only": request.market_filter.get("settled_only"),
+            },
+            "data_quality": {
+                "pit_clean": len(warnings) == 0,
+                "pit_warning_count": len(warnings),
+                "coverage_ratio": eligible_markets / requested if requested else 0.0,
+                "uses_fixture_data": source == "fixture",
+            },
+            "pit_warnings": warnings,
+        }
+
     @staticmethod
     def _calibrate_to_market(p_raw: float, p_market: float) -> float:
         return min(0.99, max(0.01, 0.7 * p_raw + 0.3 * p_market))
 
     @staticmethod
     def _score_collection(raw: dict, p_market: float) -> float:
+        return float(BacktestRunner._score_collection_model(raw, p_market)["p_raw"])
+
+    @staticmethod
+    def _score_collection_model(raw: dict, p_market: float) -> dict:
         factors = ((raw.get("features") or {}).get("factors") or {})
-        score = (
-            0.18 * float(factors.get("sentiment", 0.0))
-            + 0.12 * float(factors.get("flow_imbalance", 0.0))
-            + 0.08 * float(factors.get("book_pressure", 0.0))
-            - 0.0005 * float(factors.get("spread_bps", 0.0))
-            + 0.08 * float(factors.get("price_momentum", 0.0))
-        )
-        return min(0.99, max(0.01, p_market + score))
+        weights = FACTOR_MODEL_V1["weights"]
+        feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
+        contributions = {
+            name: feature_vector[name] * float(weight)
+            for name, weight in weights.items()
+        }
+        score = float(FACTOR_MODEL_V1["intercept"]) + sum(contributions.values())
+        p_raw = min(0.99, max(0.01, p_market + score))
+        return {
+            "id": FACTOR_MODEL_V1["id"],
+            "source": "deterministic_factor_model",
+            "baseline": "market_price",
+            "p_market": p_market,
+            "p_raw": p_raw,
+            "score_delta": score,
+            "feature_vector": feature_vector,
+            "feature_contributions": contributions,
+            "weights": weights,
+        }
+
+    @staticmethod
+    def _fixture_signal_model(p_raw: float, p_market: float) -> dict:
+        return {
+            "id": "fixture-v1",
+            "source": "deterministic_fixture",
+            "baseline": "market_price",
+            "p_market": p_market,
+            "p_raw": p_raw,
+            "score_delta": p_raw - p_market,
+            "feature_vector": {},
+            "feature_contributions": {},
+            "weights": {},
+        }
+
+    @staticmethod
+    def _snapshot_manifest(
+        *,
+        token: str,
+        row: dict,
+        raw: dict,
+        prediction_time: str,
+        available_at_max: str | None,
+    ) -> dict:
+        sources = []
+        for name, value in raw.items():
+            if name == "lab":
+                continue
+            if isinstance(value, dict):
+                available_at = value.get("available_at") or value.get("as_of") or row.get("as_of")
+                sources.append(
+                    {
+                        "source": name,
+                        "available_at": available_at,
+                        "fields": sorted(str(k) for k in value.keys())[:20],
+                    }
+                )
+            else:
+                sources.append(
+                    {
+                        "source": name,
+                        "available_at": row.get("as_of"),
+                        "fields": [],
+                    }
+                )
+        return {
+            "token_id": token,
+            "snapshot_id": f"snap_{_short_hash(token + prediction_time)}",
+            "prediction_time": prediction_time,
+            "available_at_max": available_at_max,
+            "sources": sources,
+            "pit_status": "clean" if available_at_max and available_at_max <= prediction_time else "warning",
+        }
 
 
 def get_backtest_run(run_id: str) -> BacktestRunResult | None:
