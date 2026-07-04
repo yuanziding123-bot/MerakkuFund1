@@ -10,6 +10,7 @@ from .schemas import (
     ForecastRecord,
     HypothesisRecord,
 )
+from .strategies import DEFAULT_STRATEGY_ID, STRATEGIES, LabStrategy, get_strategy
 
 __all__ = [
     "BacktestRequest",
@@ -19,7 +20,11 @@ __all__ = [
     "CreateHypothesisResponse",
     "ForecastRecord",
     "HypothesisRecord",
+    "DEFAULT_STRATEGY_ID",
     "PointInTimeError",
+    "STRATEGIES",
+    "LabStrategy",
+    "get_strategy",
     "momentum_signal",
     "naive_signal",
 ]

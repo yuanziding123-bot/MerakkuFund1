@@ -51,6 +51,14 @@ Then forecasts are written with `p_raw`, `p_cal`, `p_market`, `prediction_time`,
 And an evaluation record is written
 And the Hypothesis latest `eval_summary` is updated.
 
+### TC-LAB-004A: Run Strategy-Aware Backtest
+
+Given the same settled-market collections
+When the user runs `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
+Then each run writes an EvaluationReport with its `strategy_id`
+And `market-naive-v1` acts as the market-price baseline
+And non-baseline strategies expose feature vectors and feature contributions.
+
 ### TC-LAB-005: Show EvaluationReport
 
 Given a completed backtest

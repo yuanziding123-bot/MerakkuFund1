@@ -138,6 +138,71 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     repo.close()
 
 
+def test_backtest_runner_supports_strategy_registry(tmp_path):
+    repo = LabRepository(tmp_path / "lab.db")
+    store = DataStore(tmp_path / "data.db")
+    created = create_hypothesis(_request(), repo=repo)
+    store.record_collection(
+        "token_yes_crypto_strategy",
+        "2026-04-01T00:00:00Z",
+        "Will bitcoin close above 100k?",
+        0.50,
+        {
+            "features": {
+                "factors": {
+                    "sentiment": 0.4,
+                    "flow_imbalance": 0.2,
+                    "book_pressure": 0.1,
+                    "spread_bps": 20,
+                    "price_momentum": 0.3,
+                }
+            },
+            "lab": {"outcome": 1, "available_at_max": "2026-04-01T00:00:00Z"},
+        },
+    )
+    naive_request = BacktestRequest(
+        hypothesis_id=created.id,
+        time_window={
+            "start": "2026-03-01T00:00:00Z",
+            "end": "2026-06-01T00:00:00Z",
+        },
+        market_filter={"category": "crypto", "settled_only": True},
+        model_version="claude-sonnet-4",
+        prompt_version="signal-v1",
+        calibrator_id="shrink-to-market-v1",
+        strategy_id="market-naive-v1",
+    )
+    momentum_request = BacktestRequest(
+        hypothesis_id=created.id,
+        time_window={
+            "start": "2026-03-01T00:00:00Z",
+            "end": "2026-06-01T00:00:00Z",
+        },
+        market_filter={"category": "crypto", "settled_only": True},
+        model_version="claude-sonnet-4",
+        prompt_version="signal-v1",
+        calibrator_id="shrink-to-market-v1",
+        strategy_id="momentum-v1",
+    )
+
+    naive = BacktestRunner(store=store, repo=repo).run(naive_request)
+    momentum = BacktestRunner(store=store, repo=repo).run(momentum_request)
+
+    naive_report = repo.get_report(naive.report_id)
+    momentum_report = repo.get_report(momentum.report_id)
+    assert naive_report["backtest_config"]["strategy_id"] == "market-naive-v1"
+    assert naive_report["strategy"]["baseline"] == "market_price"
+    assert naive_report["market_sample"][0]["signal_model"]["id"] == "market-naive-v1"
+    assert naive_report["market_sample"][0]["p_raw"] == naive_report["market_sample"][0]["p_market"]
+    assert momentum_report["backtest_config"]["strategy_id"] == "momentum-v1"
+    assert momentum_report["market_sample"][0]["signal_model"]["id"] == "momentum-v1"
+    assert momentum_report["market_sample"][0]["p_raw"] != naive_report["market_sample"][0]["p_raw"]
+    assert "price_momentum" in momentum_report["market_sample"][0]["signal_model"]["feature_vector"]
+    assert "price_momentum" in momentum_report["market_sample"][0]["signal_model"]["feature_contributions"]
+    store.close()
+    repo.close()
+
+
 def test_backtest_report_surfaces_pit_warnings_when_non_strict(tmp_path):
     repo = LabRepository(tmp_path / "lab.db")
     store = DataStore(tmp_path / "data.db")

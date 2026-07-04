@@ -191,6 +191,13 @@ class DataStore:
         )
         self.conn.commit()
 
+    def collection_exists(self, token_id: str, as_of: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM collections WHERE token_id=? AND as_of=?",
+            (token_id, as_of),
+        ).fetchone()
+        return row is not None
+
     def fetch_collections(self, min_as_of: str | None = None, max_as_of: str | None = None,
                           limit: int = 500) -> list[dict]:
         """Return stored collection runs for research/backtest consumers."""

@@ -22,6 +22,7 @@ def test_backtest_request_requires_settled_markets_and_strict_pit():
     )
 
     assert request.pit_strict is True
+    assert request.strategy_id == "linear-factor-v1"
     assert request.market_filter["settled_only"] is True
 
 

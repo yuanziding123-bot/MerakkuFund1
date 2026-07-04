@@ -74,6 +74,7 @@ class BacktestRequest:
     model_version: str
     prompt_version: str
     calibrator_id: str
+    strategy_id: str = "linear-factor-v1"
     pit_strict: bool = True
     max_markets: int = 100
 

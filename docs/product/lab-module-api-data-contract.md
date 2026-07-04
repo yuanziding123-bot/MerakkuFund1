@@ -125,6 +125,7 @@ Reserved states:
   "model_version": "claude-sonnet-4",
   "prompt_version": "signal-v1",
   "calibrator_id": "shrink-to-market-v1",
+  "strategy_id": "linear-factor-v1",
   "pit_strict": true,
   "max_markets": 100
 }
@@ -134,6 +135,8 @@ Validation:
 
 - `start < end`
 - `settled_only` must be true in MVP
+- `strategy_id` defaults to `linear-factor-v1`
+- allowed MVP strategies are `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
 - `pit_strict` defaults to true
 - `max_markets` must be between 1 and 500
 
@@ -211,7 +214,18 @@ Rules:
     "prompt_version": "signal-v1",
     "calibrator_id": "shrink-to-market-v1",
     "pit_strict": true,
+    "strategy_id": "linear-factor-v1",
     "signal_model_id": "linear-factor-v1"
+  },
+  "strategy": {
+    "id": "linear-factor-v1",
+    "description": "Deterministic linear factor model over stored collection snapshots.",
+    "baseline": "market_price",
+    "available_strategies": [
+      "linear-factor-v1",
+      "market-naive-v1",
+      "momentum-v1"
+    ]
   },
   "market_universe": {
     "source": "collections",

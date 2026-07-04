@@ -14,6 +14,7 @@ Lab API to persist hypothesis evidence.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
@@ -25,10 +26,11 @@ from .pit import assert_point_in_time
 from .repository import LabRepository
 from .schemas import BacktestRequest, BacktestRunResult, ForecastRecord, utc_now
 from .service import default_repository
+from .strategies import DEFAULT_STRATEGY_ID, STRATEGIES, get_strategy
 
 
 FACTOR_MODEL_V1 = {
-    "id": "linear-factor-v1",
+    "id": DEFAULT_STRATEGY_ID,
     "description": "Deterministic factor model over stored collection snapshots.",
     "intercept": 0.0,
     "weights": {
@@ -146,8 +148,9 @@ class BacktestRunner:
 
     def run(self, request: BacktestRequest) -> BacktestRunResult:
         started = utc_now()
-        run_id = f"bt_{_short_hash(request.hypothesis_id + started)}"
+        run_id = f"bt_{_short_hash(request.hypothesis_id + request.strategy_id + started + uuid.uuid4().hex)}"
         prediction_time = request.time_window["end"]
+        strategy = get_strategy(request.strategy_id)
         forecasts, market_sample, diagnostics = self._forecasts_with_report_rows(request, run_id)
         if not forecasts:
             forecasts = self._fixture_forecasts(request, run_id, prediction_time)
@@ -187,7 +190,14 @@ class BacktestRunner:
                 "prompt_version": request.prompt_version,
                 "calibrator_id": request.calibrator_id,
                 "pit_strict": request.pit_strict,
-                "signal_model_id": FACTOR_MODEL_V1["id"],
+                "strategy_id": strategy.id,
+                "signal_model_id": strategy.id,
+            },
+            "strategy": {
+                "id": strategy.id,
+                "description": strategy.description,
+                "baseline": strategy.baseline,
+                "available_strategies": sorted(STRATEGIES),
             },
             "market_universe": diagnostics["market_universe"],
             "data_quality": diagnostics["data_quality"],
@@ -253,7 +263,7 @@ class BacktestRunner:
                 if request.pit_strict:
                     continue
             p_market = float(row.get("market_price") or lab.get("p_market") or 0.5)
-            model_output = self._score_collection_model(raw, p_market)
+            model_output = self._score_collection_model(raw, p_market, strategy_id=request.strategy_id)
             if "p_raw" in lab:
                 model_output = {
                     **model_output,
@@ -451,31 +461,12 @@ class BacktestRunner:
         return min(0.99, max(0.01, 0.7 * p_raw + 0.3 * p_market))
 
     @staticmethod
-    def _score_collection(raw: dict, p_market: float) -> float:
-        return float(BacktestRunner._score_collection_model(raw, p_market)["p_raw"])
+    def _score_collection(raw: dict, p_market: float, strategy_id: str | None = None) -> float:
+        return float(BacktestRunner._score_collection_model(raw, p_market, strategy_id=strategy_id)["p_raw"])
 
     @staticmethod
-    def _score_collection_model(raw: dict, p_market: float) -> dict:
-        factors = ((raw.get("features") or {}).get("factors") or {})
-        weights = FACTOR_MODEL_V1["weights"]
-        feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
-        contributions = {
-            name: feature_vector[name] * float(weight)
-            for name, weight in weights.items()
-        }
-        score = float(FACTOR_MODEL_V1["intercept"]) + sum(contributions.values())
-        p_raw = min(0.99, max(0.01, p_market + score))
-        return {
-            "id": FACTOR_MODEL_V1["id"],
-            "source": "deterministic_factor_model",
-            "baseline": "market_price",
-            "p_market": p_market,
-            "p_raw": p_raw,
-            "score_delta": score,
-            "feature_vector": feature_vector,
-            "feature_contributions": contributions,
-            "weights": weights,
-        }
+    def _score_collection_model(raw: dict, p_market: float, strategy_id: str | None = None) -> dict:
+        return get_strategy(strategy_id).predict(raw, p_market)
 
     @staticmethod
     def _fixture_signal_model(p_raw: float, p_market: float) -> dict:
