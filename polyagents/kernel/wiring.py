@@ -18,6 +18,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            evaluate_skill_capability, hunt_alpha_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
+                           settle_and_reflect_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            strategy_capability)
@@ -252,6 +253,16 @@ def default_registry() -> list:
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
 
     # ----- vertical pack capabilities: news-events / microstructure ----------
+
+    def settle_and_reflect(query):
+        """Settle resolved paper trades (book P&L) + Layer-4 reflection (write lessons)."""
+        settled = eng.settle(reflect=True)
+        recs = [{"question": s.get("question"), "won": s.get("won"),
+                 "resolved_winner": s.get("resolved_winner"),
+                 "realized_pnl": s.get("realized_pnl"), "realized_return": s.get("realized_return"),
+                 "lesson": s.get("lesson")} for s in settled]
+        return {"n_settled": len(recs), "settled": recs,
+                "portfolio": mcp_server.portfolio_status()}
 
     def paper_trade(market_ref):
         """Analyse a market, take the deterministic sized decision, and paper-execute if
@@ -569,6 +580,7 @@ def default_registry() -> list:
         evaluate_skill_capability(evaluate_skill),
         portfolio_review_capability(portfolio_review),
         paper_trade_capability(paper_trade),
+        settle_and_reflect_capability(settle_and_reflect),
         news_sentiment_capability(news_sentiment),
         microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),

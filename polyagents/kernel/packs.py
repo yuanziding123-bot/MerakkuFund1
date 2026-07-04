@@ -47,8 +47,8 @@ PACKS: dict[str, dict] = {
     },
     "paper-exec": {
         "name": "纸面交易(动手)",
-        "description": "对一个市场 size + 过风控 + 下纸面单(paper money)。gated:选中才能让 loop 动手。",
-        "capabilities": ["paper_trade"],
+        "description": "对市场 size+过风控+下纸面单,以及结算+反思学习(paper money)。gated:选中才能让 loop 动手。",
+        "capabilities": ["paper_trade", "settle_and_reflect"],
     },
 }
 

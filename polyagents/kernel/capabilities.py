@@ -149,6 +149,21 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def settle_and_reflect_capability(fn: Callable) -> Capability:
+    """Settle resolved paper trades + Layer-4 reflection (pack: paper-exec).
+
+    ``fn(query) -> dict`` settles any paper position whose market has resolved (books
+    $1/$0 payout and realised P&L) and writes a reflection lesson per trade — closing
+    the feedback loop so evaluate_skill has data and future signals learn."""
+    def run(ctx: Context) -> dict:
+        return {"settlement": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("settle_and_reflect",
+                      "Settle resolved PAPER trades (book P&L) and reflect on each outcome "
+                      "(what the signal got right/wrong → a lesson). Use for 'settle my trades', "
+                      "'close resolved positions', 'what did we learn'.",
+                      frozenset({"question"}), frozenset({"settlement"}), run, cost=3)
+
+
 def paper_trade_capability(fn: Callable) -> Capability:
     """Paper-trade a market — the loop's one 'act' capability (pack: paper-exec, gated).
 

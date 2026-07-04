@@ -16,7 +16,7 @@ class FakeLLM:
 
 
 def test_paper_trade_is_a_gated_pack():
-    assert PACKS["paper-exec"]["capabilities"] == ["paper_trade"]
+    assert "paper_trade" in PACKS["paper-exec"]["capabilities"]
     assert "paper_trade" not in kernel_capability_names([])            # not core
     assert "paper_trade" in kernel_capability_names(["paper-exec"])    # loads when selected
 

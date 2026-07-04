@@ -626,6 +626,33 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_settlement(a: dict, path: str) -> str:
+    """Render settle + reflect: resolved paper trades booked, with lessons."""
+    recs = a.get("settled") or []
+    p = a.get("portfolio", {}) or {}
+    lines = [f"**结算 & 反思 · settle_and_reflect** · {path}", ""]
+    if not recs:
+        lines.append("当前没有可结算的交易(无已解决的纸面持仓)。先用 paper_trade 下单,等市场结算后再来。")
+        return "\n".join(lines)
+    lines.append(f"结算了 **{a.get('n_settled')}** 笔:")
+    lines.append("\n| 市场 | 结果 | 已实现 P&L | 收益率 |")
+    lines.append("|---|---|---|---|")
+    for s in recs:
+        won = "✅赢" if s.get("won") else "❌输"
+        ret = s.get("realized_return")
+        lines.append(f"| {(s.get('question') or '')[:34]} | {won} | {s.get('realized_pnl')} | "
+                     f"{(f'{ret:+.1%}' if isinstance(ret, (int, float)) else '—')} |")
+    lessons = [s.get("lesson") for s in recs if s.get("lesson")]
+    if lessons:
+        lines.append("\n**反思(Layer 4 lessons)**:")
+        for ls in lessons[:5]:
+            lines.append(f"- {ls}")
+    lines.append(f"\n**组合(纸面)**:现金 ${p.get('cash')} · 已实现 P&L ${p.get('realized_pnl')} · "
+                 f"持仓 {len(p.get('open_positions') or [])} 个")
+    lines.append("\n_结算写入决策日志与 lesson,下次同类市场的信号会带上这些教训;整体表现 → evaluate_skill。_")
+    return "\n".join(lines)
+
+
 def _format_paper_trade(a: dict, path: str) -> str:
     """Render the paper-trade outcome (sized decision + circuit-breaker result)."""
     if a.get("error"):
@@ -865,6 +892,8 @@ def _kernel_summary(ctx) -> str:
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
     if "paper_trade" in f:                               # the action taken wins — it's terminal
         return _format_paper_trade(f["paper_trade"], path)
+    if "settlement" in f:                                # settle + reflect outcome
+        return _format_settlement(f["settlement"], path)
     if "recommendation" in f:                           # Goal-2: topic → recommended target
         out = _format_recommendation(f["recommendation"], path)
         if "market_analysis" in f:                      # controller also deep-analyzed the pick
