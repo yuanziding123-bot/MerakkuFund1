@@ -89,6 +89,19 @@ async def mcp_servers() -> JSONResponse:
     return JSONResponse(list_mcp_servers())
 
 
+@app.get("/api/capabilities")
+async def capabilities() -> JSONResponse:
+    """The kernel loop's capabilities (what the controller can auto-select each step)."""
+    try:
+        from polyagents.kernel.modes import registry_for
+        caps = [{"name": c.name, "description": c.description,
+                 "needs": sorted(c.preconditions), "gives": sorted(c.effects), "cost": c.cost}
+                for c in registry_for("kernel")]
+        return JSONResponse({"capabilities": caps})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)})
+
+
 @app.get("/api/portfolio")
 async def portfolio() -> JSONResponse:
     try:

@@ -353,7 +353,14 @@
   @media(max-width:1100px){.lab-row{grid-template-columns:1fr}}
 
   /* ── live + eval views ── */
-  #liveView,#evalView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  #liveView,#evalView,#libraryView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  .lib-h{font-weight:500;font-size:14px;margin:14px 2px 12px;display:flex;justify-content:space-between;align-items:baseline}
+  .lib-h .mut{color:var(--mute);font-size:11px;font-weight:400}
+  .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+  .lib-card{border:1px solid var(--hairline);background:var(--canvas-soft);border-radius:var(--radius-sm);padding:11px 13px}
+  .lib-name{font-weight:500;font-size:12.5px;font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .lib-io{color:var(--mute);font-size:10px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+  .lib-desc{color:var(--mute);font-size:12px;margin-top:5px;line-height:1.42}
   .live-gate{border:1px solid var(--line);background:var(--panel2);border-radius:12px;overflow:hidden;max-width:520px}
   .lg-row{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
   .lg-row:last-child{border-bottom:0} .lg-row span:first-child{color:var(--muted)}
@@ -475,6 +482,8 @@
           <span class="ni">📈</span><span class="nt"><b>Markets</b><small>polymarket</small></span></button>
         <button class="nav2" id="nav-eval" onclick="showView('eval')">
           <span class="ni">◎</span><span class="nt"><b>Evaluation</b><small>brier · ece · baseline</small></span></button>
+        <button class="nav2" id="nav-library" onclick="showView('library')">
+          <span class="ni">🧩</span><span class="nt"><b>Capabilities</b><small>loop 能力 + skills</small></span><span class="nb" id="navCapCt"></span></button>
       </div>
 
       <div class="nav-foot">
@@ -733,6 +742,17 @@
           <button class="send" style="height:38px" onclick="loadEval()">↻ run</button>
         </div>
         <pre id="evalBody" class="evalbox">Click "run" to score resolved predictions vs the market baseline.</pre>
+      </div>
+
+      <div id="libraryView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Capabilities & Skills</h1>
+            <p class="sk-lead">Kernel loop 每步能自动选用的能力,以及可挂载的 skills 一览。</p>
+          </div>
+          <button class="send" style="height:38px" onclick="loadLibrary()">↻ refresh</button>
+        </div>
+        <div id="libraryBody"><div class="hist">Loading…</div></div>
       </div>
 
       <div id="skillsView">
@@ -1083,6 +1103,7 @@ const CRUMBS = {
   live:{m:'Live',s:'real money · gated'}, objects:{m:'Objects',s:'5 types · version + lineage'},
   markets:{m:'Markets',s:'polymarket · live'}, eval:{m:'Evaluation',s:'brier · ece · baseline'},
   skills:{m:'Skills',s:'configure the Ask agent'},
+  library:{m:'Capabilities',s:'loop 能力 + skills 一览'},
 };
 let labSub = 'hypo';               // which Lab sub-view is active (hypo|strategy|backtest)
 let curView = 'ask';
@@ -1096,13 +1117,14 @@ function showView(v){
   show('objectsView', v==='objects');
   show('liveView', v==='live');
   show('evalView', v==='eval');
+  show('libraryView', v==='library');
   show('skillsView', v==='skills');
   show('labHypoView', labOn && labSub==='hypo');
   show('strategyView', labOn && labSub==='strategy');
   show('backtestView', labOn && labSub==='backtest');
   document.getElementById('labBar').style.display = labOn ? 'flex' : 'none';
   // rail active state
-  ['ask','lab','live','objects','markets','eval'].forEach(k =>
+  ['ask','lab','live','objects','markets','eval','library'].forEach(k =>
     document.getElementById('nav-'+k).classList.toggle('active', k===v || (v==='skills'&&k==='ask')));
   // middle list column shows in Ask (chat history) and Lab (hypotheses); hide portfolio there
   const withList = (v==='ask' || v==='skills' || v==='lab');
@@ -1117,6 +1139,7 @@ function showView(v){
   if(v==='markets'){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }
   if(v==='objects'){ loadObjects(); }
   if(v==='live'){ loadMcp(); loadAudit(); }
+  if(v==='library'){ loadLibrary(); }
   if(labOn){ loadLabHypos(); }
   if(labOn && labSub==='strategy'){ loadStrategyMarkets(); }
 }
@@ -1125,6 +1148,28 @@ function showLab(sub){
   ['hypo','strategy','backtest'].forEach(s =>
     document.getElementById('labtab-'+s).classList.toggle('active', s===sub));
   showView('lab');
+}
+async function loadLibrary(){
+  const body = document.getElementById('libraryBody');
+  body.innerHTML = '<div class="hist">Loading…</div>';
+  try{
+    const [capR, skills] = await Promise.all([
+      fetch('/api/capabilities').then(r=>r.json()),
+      fetch('/api/skills').then(r=>r.json())
+    ]);
+    const caps = (capR && capR.capabilities) || [];
+    const card = (name, io, desc) =>
+      `<div class="lib-card"><div class="lib-name">${esc(name)}<span class="lib-io">${esc(io)}</span></div>`
+      + `<div class="lib-desc">${esc(desc||'')}</div></div>`;
+    let html = `<div class="lib-h">Kernel Capabilities <span class="mut">${caps.length} 个 · Kernel 模式下 loop 每步自动选用</span></div><div class="lib-grid">`;
+    html += caps.map(c => card(c.name, ((c.needs||[]).join(',')||'—')+' → '+(c.gives||[]).join(','), c.description)).join('');
+    html += '</div>';
+    html += `<div class="lib-h">Skills <span class="mut">${(skills||[]).length} 个 · SKILL.md · Ask 的 Domain 模式用作系统提示</span></div><div class="lib-grid">`;
+    html += (skills||[]).map(s => card(s.name, s.category||'General', s.description)).join('');
+    html += '</div>';
+    body.innerHTML = html;
+    const ct = document.getElementById('navCapCt'); if(ct) ct.textContent = caps.length;
+  }catch(e){ body.innerHTML = '<div class="st-err">加载失败:'+esc(String(e))+'</div>'; }
 }
 // middle list column is context-sensitive: Ask=conversations, Lab=hypotheses
 function renderListColumn(v){
