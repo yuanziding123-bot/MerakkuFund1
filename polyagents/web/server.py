@@ -91,15 +91,29 @@ async def mcp_servers() -> JSONResponse:
 
 @app.get("/api/capabilities")
 async def capabilities() -> JSONResponse:
-    """The kernel loop's capabilities (what the controller can auto-select each step)."""
+    """The kernel loop's capabilities, tagged core (always on) vs which vertical pack."""
     try:
         from polyagents.kernel.modes import registry_for
+        from polyagents.kernel.packs import CORE, PACKS
+        of_pack = {cap: pid for pid, p in PACKS.items() for cap in p["capabilities"]}
         caps = [{"name": c.name, "description": c.description,
-                 "needs": sorted(c.preconditions), "gives": sorted(c.effects), "cost": c.cost}
-                for c in registry_for("kernel")]
+                 "needs": sorted(c.preconditions), "gives": sorted(c.effects),
+                 "tier": "core" if c.name in CORE else "pack",
+                 "pack": of_pack.get(c.name)}
+                for c in registry_for("kernel")]   # None packs = all, so every capability shows
         return JSONResponse({"capabilities": caps})
     except Exception as exc:
         return JSONResponse({"error": str(exc)})
+
+
+@app.get("/api/packs")
+async def packs() -> JSONResponse:
+    """Selectable vertical capability packs (loaded on demand by the kernel)."""
+    from polyagents.kernel.packs import PACKS
+    return JSONResponse({"packs": [{"id": pid, "name": p["name"],
+                                    "description": p["description"],
+                                    "capabilities": p["capabilities"]}
+                                   for pid, p in PACKS.items()]})
 
 
 @app.get("/api/portfolio")
@@ -740,11 +754,13 @@ def _kernel_summary(ctx) -> str:
     return f"**kernel** 无法完成目标 {sorted(ctx.goal.targets)}(路径: {path})。"
 
 
-async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncIterator[str]:
+async def _stream_kernel(history: list[dict], session: "AgentSession",
+                         packs: list[str] | None = None) -> AsyncIterator[str]:
     """Kernel mode: the request goes through the ONE kernel loop, which recognises
     intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
-    …). The prior turns are passed as cross-turn memory. Runs the sync loop in a
-    thread and bridges its ``on_event`` to SSE."""
+    …). The prior turns are passed as cross-turn memory; ``packs`` selects which
+    vertical capability packs are loaded. Runs the sync loop in a thread and bridges
+    its ``on_event`` to SSE."""
     from polyagents.kernel import run_mode
 
     # split the conversation into the current request + the prior turns (memory)
@@ -762,7 +778,7 @@ async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncI
 
     def work() -> None:
         try:
-            ctx = run_mode("kernel", request=last_text, history=prior, on_event=on_event)
+            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs, on_event=on_event)
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
         except Exception as exc:                        # surface, don't crash the stream
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
@@ -807,7 +823,7 @@ def _chunk_text(text: str, size: int = 24):
 
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
                   attachments: list[str] | None = None,
-                  mode: str = "auto") -> AsyncIterator[str]:
+                  mode: str = "auto", packs: list[str] | None = None) -> AsyncIterator[str]:
     # The web chat IS the Ask mode: one session decides tools (read-only),
     # permissions and audit. mode → readonly tool subset + audit trail (§八-B/§九).
     session = AgentSession("ask", audit=_audit())
@@ -819,7 +835,7 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     if mode == "kernel":
         session.log("session.start", model=model, skills=skills,
                     attachments=len(attachments or []))
-        async for ev in _stream_kernel(history, session):
+        async for ev in _stream_kernel(history, session, packs):
             yield ev
         return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
@@ -882,5 +898,6 @@ async def chat(request: Request) -> StreamingResponse:
     model = body.get("model")
     attachments = body.get("attachments", [])
     mode = body.get("mode", "auto")
-    return StreamingResponse(_stream(history, skills, model, attachments, mode),
+    packs = body.get("packs")                            # kernel: which vertical packs to load (None = all)
+    return StreamingResponse(_stream(history, skills, model, attachments, mode, packs),
                              media_type="text/event-stream")

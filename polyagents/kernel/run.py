@@ -50,11 +50,12 @@ def _as_context(result: KernelResult) -> Context:
 
 def run_mode(mode: str, *, request: str | None = None, registry: list | None = None,
              max_steps: int = 12, llm=None, history=None, fallback_planner=None,
-             audit=None, on_event=None, **facts) -> Context:
+             packs: list[str] | None = None, audit=None, on_event=None, **facts) -> Context:
     """Run ``mode`` through the kernel. ``registry`` overrides the wiring (tests);
     ``llm`` overrides the controller model; ``history`` is the prior conversation
-    (kernel mode, cross-turn memory). Returns a Context."""
-    reg = registry if registry is not None else registry_for(mode)
+    (kernel mode, cross-turn memory); ``packs`` selects which vertical capability packs
+    to load (kernel mode). Returns a Context."""
+    reg = registry if registry is not None else registry_for(mode, packs)
     if mode == "kernel":
         controller_llm = llm if llm is not None else _default_controller_llm()
         if controller_llm is not None:
