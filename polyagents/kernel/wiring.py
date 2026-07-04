@@ -17,7 +17,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            discover_markets_capability, domain_capability,
                            evaluate_skill_capability, hunt_alpha_capability,
                            microstructure_scan_capability, news_sentiment_capability,
-                           portfolio_review_capability,
+                           paper_trade_capability, portfolio_review_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            strategy_capability)
@@ -252,6 +252,31 @@ def default_registry() -> list:
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
 
     # ----- vertical pack capabilities: news-events / microstructure ----------
+
+    def paper_trade(market_ref):
+        """Analyse a market, take the deterministic sized decision, and paper-execute if
+        it's actionable (buy/sell). Paper money, through the circuit breaker."""
+        ref = market_ref or {}
+        m = mcp_server._get_market(ref.get("token_id", "")) if ref.get("token_id") else None
+        if m is None:
+            return {"error": f"market not found: {ref}"}
+        core = _analysis_core(m)
+        sig, dec = core["signal"], core["decision"]
+        if dec is None:
+            return {"market": {"question": m.question, "price": m.price},
+                    "action": "hold", "executed": False, "note": "no decision",
+                    "portfolio": mcp_server.portfolio_status()}
+        result, executed = None, False
+        if dec.action in ("buy", "sell") and dec.size_usdc > 0:
+            result = mcp_server.paper_execute(m.token_id, dec.action, round(dec.size_usdc, 2))
+            executed = result.get("status") == "filled"
+        return {
+            "market": {"question": m.question, "token_id": m.token_id, "price": round(m.price, 4)},
+            "action": dec.action, "p_true": round(sig.p_true, 3) if sig is not None else None,
+            "edge": round(dec.edge, 4), "size_usdc": round(dec.size_usdc, 2),
+            "reasons": dec.reasons, "executed": executed, "result": result,
+            "portfolio": mcp_server.portfolio_status(),
+        }
 
     def evaluate_skill(query):
         return {"report": mcp_server.evaluation_report()}
@@ -543,6 +568,7 @@ def default_registry() -> list:
         hunt_alpha_capability(hunt_alpha),
         evaluate_skill_capability(evaluate_skill),
         portfolio_review_capability(portfolio_review),
+        paper_trade_capability(paper_trade),
         news_sentiment_capability(news_sentiment),
         microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),

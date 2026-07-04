@@ -44,6 +44,8 @@ _SYS = (
     "'News / sentiment / headlines on X' → news_sentiment.\n"
     "'Do we have skill / are we beating the market / calibration report' → evaluate_skill. "
     "'Show my portfolio / P&L / positions / how are my trades doing' → portfolio_review.\n"
+    "'Paper trade / take a position on / buy / sell a market (paper)' → resolve_market → "
+    "paper_trade (only if that capability is loaded; it is gated).\n"
     "When a specialized scan (hunt_alpha / find_crypto_arb / microstructure_scan / "
     "news_sentiment) fits the request, call it and answer from its result — do NOT also call "
     "domain_answer for the same thing.\n"

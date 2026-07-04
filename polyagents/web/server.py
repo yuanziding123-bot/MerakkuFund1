@@ -626,6 +626,32 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_paper_trade(a: dict, path: str) -> str:
+    """Render the paper-trade outcome (sized decision + circuit-breaker result)."""
+    if a.get("error"):
+        return f"**纸面交易 · paper_trade** · {path}\n\n失败:{a['error']}"
+    m = a.get("market", {})
+    act = (a.get("action") or "hold").upper()
+    p = a.get("portfolio", {}) or {}
+    lines = [f"**纸面交易 · paper_trade** · {path}", "",
+             f"**标的**:{m.get('question')}  \n价 {m.get('price')} · p_true={a.get('p_true')} · "
+             f"edge={a.get('edge')} · 建议 size ${a.get('size_usdc')}"]
+    if a.get("executed"):
+        r = a.get("result") or {}
+        lines.append(f"\n→ **{act} 已成交(纸面)** · status={r.get('status')} · 已实现 P&L {r.get('realized_pnl')}")
+    elif a.get("action") in ("buy", "sell"):
+        r = a.get("result") or {}
+        lines.append(f"\n→ **{act} 未成交** · status={r.get('status')} · {r.get('reason') or '被风控拦截'}")
+    else:
+        lines.append(f"\n→ **HOLD**,未达门槛,不下单(edge 不足或风控)。这是常态,不是失败。")
+    if a.get("reasons"):
+        lines.append("　依据:" + "；".join(str(x) for x in a["reasons"][:3]))
+    lines.append(f"\n**组合(纸面)**:现金 ${p.get('cash')} · 敞口 ${p.get('exposure')} · "
+                 f"已实现 P&L ${p.get('realized_pnl')} · 持仓 {len(p.get('open_positions') or [])} 个")
+    lines.append("\n_纸面交易(paper money),经风控/熔断。想看整体表现 → portfolio_review;结算后 → evaluate_skill。_")
+    return "\n".join(lines)
+
+
 def _format_skill_report(a: dict, path: str) -> str:
     """Render the calibration / skill report (does p_cal beat market)."""
     return f"**技能评估 · evaluate_skill** · {path}\n\n```\n{a.get('report', '(无数据)')}\n```"
@@ -837,6 +863,8 @@ def _kernel_summary(ctx) -> str:
     numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
+    if "paper_trade" in f:                               # the action taken wins — it's terminal
+        return _format_paper_trade(f["paper_trade"], path)
     if "recommendation" in f:                           # Goal-2: topic → recommended target
         out = _format_recommendation(f["recommendation"], path)
         if "market_analysis" in f:                      # controller also deep-analyzed the pick

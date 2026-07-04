@@ -149,6 +149,23 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def paper_trade_capability(fn: Callable) -> Capability:
+    """Paper-trade a market — the loop's one 'act' capability (pack: paper-exec, gated).
+
+    ``fn(market_ref) -> dict`` analyses the market, takes the deterministic sized/risk-
+    gated decision, and — only if it's an actionable buy/sell — places a PAPER order
+    through the circuit breaker, updating the paper portfolio. Most markets are efficient
+    so the honest result is usually HOLD (no trade). Paper money only."""
+    def run(ctx: Context) -> dict:
+        return {"paper_trade": fn(ctx.facts["market_ref"])}
+    return Capability("paper_trade",
+                      "PAPER-trade a specific market: size + risk-gate the decision and, if "
+                      "actionable (buy/sell), place a paper order through the circuit breaker. "
+                      "Paper money only. Use for 'paper trade X', 'take a position on X', 'buy/"
+                      "sell X (paper)'. Needs a resolved market first (resolve_market/analyze).",
+                      frozenset({"market_ref"}), frozenset({"paper_trade"}), run, cost=4)
+
+
 def evaluate_skill_capability(fn: Callable) -> Capability:
     """Calibration / skill report — does our p_cal actually beat the market baseline?
 

@@ -45,6 +45,11 @@ PACKS: dict[str, dict] = {
         "description": "data→signal→risk 监督者一条龙,给一个市场出决策。",
         "capabilities": ["strategy"],
     },
+    "paper-exec": {
+        "name": "纸面交易(动手)",
+        "description": "对一个市场 size + 过风控 + 下纸面单(paper money)。gated:选中才能让 loop 动手。",
+        "capabilities": ["paper_trade"],
+    },
 }
 
 
