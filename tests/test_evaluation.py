@@ -38,7 +38,7 @@ def test_model_beats_market_significantly_has_ci():
     res = evaluate(recs)
     o = res["overall"]
     assert o["beats_market"] is True and o["beats_market_ci"] is True
-    assert o["brier_delta"] < 0 and o["brier_delta_ci"][1] < 0     # whole CI below 0
+    assert o["brier_delta"] > 0 and o["brier_delta_ci"][0] > 0     # whole CI above 0
     report = format_report(res)
     assert "BEATS market" in report and "95% CI" in report and "delta" in report
 
@@ -67,7 +67,7 @@ def test_verdict_tiers_and_sample_flag():
     assert "NOT significant" in r and "preliminary" in r
     # CI excludes 0 -> significant BEATS
     assert "BEATS market" in format_report(
-        _full_overall(beats_market=True, beats_market_ci=True, brier_delta_ci=(-0.05, -0.01)))
+        _full_overall(beats_market=True, beats_market_ci=True, brier_delta_ci=(0.01, 0.05)))
     # no edge
     assert "does NOT beat market" in format_report(
         _full_overall(beats_market=False, beats_market_ci=False))

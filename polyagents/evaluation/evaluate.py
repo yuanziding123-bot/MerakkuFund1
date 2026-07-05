@@ -37,7 +37,7 @@ def _score_group(records: list[dict]) -> dict:
     raw = [float(r.get("raw_p_true") if r.get("raw_p_true") is not None else r.get("p_true")) for r in records]
     market = [float(r.get("market_price")) for r in records]
     model_brier, market_brier = brier_score(model, y), brier_score(market, y)
-    # bootstrap CI on the Brier delta (model − market; negative = model better).
+    # bootstrap CI on the Brier delta (market − model; positive = model better).
     # Lazy import to avoid the evaluate↔alpha module cycle.
     from .alpha import bootstrap_brier_delta_ci
     ci = bootstrap_brier_delta_ci(model, market, y) if len(y) >= 2 else (0.0, 0.0)
@@ -49,9 +49,9 @@ def _score_group(records: list[dict]) -> dict:
         "market_brier": market_brier,
         "brier_skill_vs_market": (1 - model_brier / market_brier) if market_brier else 0.0,
         "beats_market": model_brier < market_brier,           # point estimate
-        "brier_delta": model_brier - market_brier,
+        "brier_delta": market_brier - model_brier,
         "brier_delta_ci": ci,                                  # bootstrap 95% CI
-        "beats_market_ci": ci[1] < 0,                          # whole CI below 0 = significant
+        "beats_market_ci": ci[0] > 0,                          # whole CI above 0 = significant
         "sample_adequate": len(records) >= 30,
         "model_log_loss": log_loss(model, y),
         "market_log_loss": log_loss(market, y),
