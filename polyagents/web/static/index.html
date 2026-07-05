@@ -160,6 +160,18 @@
   .verdict.noise{background:#2f2828;border:1px solid #4a3836;color:var(--red)}
   .chartbox{border:1px solid var(--hairline);background:var(--canvas-soft);border-radius:var(--radius-sm);padding:12px}
   .chartbox .t{color:var(--mute);font-size:12px;margin-bottom:6px}
+  .workflow{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .wf-step{border:1px solid var(--hairline);background:var(--canvas-soft);border-radius:var(--radius-sm);padding:12px;min-height:104px}
+  .wf-step .n{font:12px "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--primary);margin-bottom:7px}
+  .wf-step .t{font-weight:500;font-size:14px;margin-bottom:6px;color:var(--ink)}
+  .wf-step .d{font-size:12.5px;color:var(--mute);line-height:1.45}
+  .strategy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px}
+  .strategy-pill{border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:10px}
+  .strategy-pill b{display:block;font-size:13px;margin-bottom:5px}
+  .strategy-pill span{display:block;color:var(--mute);font-size:12px;line-height:1.4}
+  .next-hint{border:1px solid var(--toolline);background:var(--tool);border-radius:var(--radius-sm);padding:10px 12px;color:var(--body-strong);font-size:13px;line-height:1.5}
+  @media(max-width:900px){.workflow{grid-template-columns:1fr 1fr}}
+  @media(max-width:560px){.workflow{grid-template-columns:1fr}}
 
   /* ── strategy module ── */
   #strategyView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
@@ -637,6 +649,13 @@
           </div>
         </div>
 
+        <div class="workflow" aria-label="Lab backtest workflow">
+          <div class="wf-step"><div class="n">01</div><div class="t">确认数据</div><div class="d">先看 Data ingestion 的 usable settled 数量。为 0 时点 Run ingestion。</div></div>
+          <div class="wf-step"><div class="n">02</div><div class="t">运行 evidence</div><div class="d">选择 hypothesis、strategy，Category 保持 all，然后点 Run evidence。</div></div>
+          <div class="wf-step"><div class="n">03</div><div class="t">查看 report</div><div class="d">结果会进入 Reports ledger，点击任一行在下方展开完整 EvaluationReport。</div></div>
+          <div class="wf-step"><div class="n">04</div><div class="t">再做 replay / monitor</div><div class="d">Historical replay 和 dry-run monitor 是辅助验证，不代表真实下单。</div></div>
+        </div>
+
         <div class="panel">
           <div class="panel-h"><span>Data ingestion · historical settled collections</span><button onclick="loadLabDataStatus()">refresh</button></div>
           <div class="cards" id="labDataCards"></div>
@@ -655,7 +674,8 @@
             <label>Category <input id="labBtCategory" value="all" /></label>
             <button class="send" id="labBtRun" onclick="runLabBacktestFromPanel()">▶ Run evidence</button>
           </div>
-          <div id="labBtPanelResult"><div class="hist">建议先用 category=all 确认真实 collections 链路；若显示 fixture fallback，说明该窗口/slice 没有匹配到可用 settled collections。</div></div>
+          <div id="labStrategyCatalog"></div>
+          <div id="labBtPanelResult"><div class="next-hint">下一步：点 Run evidence。完成后看下方 Reports ledger 的最新一行；source 应优先显示 real collections，fixture fallback 只代表演示链路。</div></div>
         </div>
 
         <div class="panel" style="margin-top:16px">
@@ -700,11 +720,11 @@
         <div class="st-top">
           <div>
             <h1 class="sk-title">Strategy</h1>
-            <p class="sk-lead">A supervisor (main agent) runs an <b>agent loop</b>, dispatching specialist sub-agents over the live engine. Watch them run end-to-end.</p>
+            <p class="sk-lead">Live agent loop preview. 这里运行 data / signal / risk 子代理；Lab 的 backtest 策略在 Backtest 页选择和评估。</p>
           </div>
         </div>
         <div class="st-controls">
-          <label>Market <select id="stMarket"><option value="">most active</option></select></label>
+          <label>Market <select id="stMarket"><option value="">loading markets…</option></select></label>
           <label>Strategy <select id="stStrategy">
             <option value="research">research · data only</option>
             <option value="signal">signal · data + signal</option>
@@ -717,7 +737,7 @@
           </select></label>
           <button class="send" id="stRun" onclick="runStrategy()">▶ Run</button>
         </div>
-        <div id="stHeader" class="st-header"></div>
+        <div id="stHeader" class="st-header">先等待 Market 下拉加载。若没有市场，请去 Markets 页 refresh 或稍后重试。</div>
         <div class="st-flow" id="stFlow"></div>
         <div id="stFinal"></div>
       </div>
@@ -1255,13 +1275,13 @@ async function loadEval(){
 let labHypos = [], labSelId = null, labDetails = {}, labReports = {};
 let labDataStatus = null;
 const LAB_STRATEGIES = [
-  ['linear-factor-v1','linear-factor-v1 · default'],
-  ['market-naive-v1','market-naive-v1 · baseline'],
-  ['momentum-v1','momentum-v1'],
-  ['flow-imbalance-v1','flow-imbalance-v1'],
-  ['microstructure-v1','microstructure-v1'],
-  ['sentiment-v1','sentiment-v1'],
-  ['contrarian-v1','contrarian-v1'],
+  ['linear-factor-v1','linear-factor-v1 · default','综合 sentiment / flow / book / momentum 的确定性因子模型。'],
+  ['market-naive-v1','market-naive-v1 · baseline','直接相信市场价格，用作所有策略的 baseline。'],
+  ['momentum-v1','momentum-v1','跟随历史价格动量，并用轻量 flow 确认。'],
+  ['flow-imbalance-v1','flow-imbalance-v1','根据买卖成交流和盘口压力寻找方向。'],
+  ['microstructure-v1','microstructure-v1','使用 book pressure、micro-price 与 spread 做微观结构信号。'],
+  ['sentiment-v1','sentiment-v1','以 sentiment 为主，叠加 flow 和 momentum。'],
+  ['contrarian-v1','contrarian-v1','均值回归/反动量，淡化短期过热走势。'],
 ];
 function labBadge(s){ return `<span class="ob-badge ${s}">${esc(s)}</span>`; }
 function labMetric(m, key, fallback='—'){
@@ -1419,6 +1439,13 @@ function currentLabStrategy(){
 function strategyOptions(selected='linear-factor-v1'){
   return LAB_STRATEGIES.map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${esc(label)}</option>`).join('');
 }
+function renderLabStrategyCatalog(){
+  const el=document.getElementById('labStrategyCatalog');
+  if(!el) return;
+  el.innerHTML='<div class="hist" style="padding:0;margin:0 0 6px">Supported Lab strategies</div>'+
+    '<div class="strategy-grid">'+LAB_STRATEGIES.map(([id,label,desc])=>
+      `<div class="strategy-pill"><b>${esc(id)}</b><span>${esc(desc||label)}</span></div>`).join('')+'</div>';
+}
 function renderLabWorkflowSelectors(){
   const sel=document.getElementById('labBtHypothesis');
   if(!sel) return;
@@ -1462,6 +1489,7 @@ function renderLabReportLedger(){
 }
 async function loadLabWorkflow(){
   renderLabWorkflowSelectors();
+  renderLabStrategyCatalog();
   renderLabReportLedger();
   await loadLabDataStatus();
 }
@@ -1764,14 +1792,25 @@ let stratBusy = false;
 async function loadStrategyMarkets(){
   const sel = document.getElementById('stMarket');
   if(sel.dataset.loaded) return;
+  sel.innerHTML='<option value="">loading markets…</option>';
+  sel.disabled=true;
   try{
     const rows = await (await fetch('/api/markets?limit=25')).json();
-    if(Array.isArray(rows)){
+    sel.innerHTML='';
+    if(Array.isArray(rows) && rows.some(r=>r.yes_token)){
       rows.forEach(r => { if(r.yes_token){ const o=document.createElement('option');
         o.value=r.yes_token; o.textContent=r.question.slice(0,70); sel.appendChild(o); } });
+      sel.disabled=false;
       sel.dataset.loaded = '1';
+      document.getElementById('stHeader').innerHTML='选择一个 market 后点 Run。Research 可本地演示；signal/full/trade 需要 API key。';
+    }else{
+      sel.innerHTML='<option value="">no active markets loaded</option>';
+      document.getElementById('stHeader').innerHTML='<span class="v-neg">没有可用 market。</span> 请先去 Markets 页 refresh，或确认 Polymarket 数据源可访问。';
     }
-  }catch(e){}
+  }catch(e){
+    sel.innerHTML='<option value="">market load failed</option>';
+    document.getElementById('stHeader').innerHTML='<span class="v-neg">Market 加载失败。</span> '+esc(e.message||e);
+  }
 }
 const ST_ICONS = {data:'D', signal:'S', risk:'R', execution:'X'};
 function stStep(agent){
@@ -1786,10 +1825,14 @@ function stStep(agent){
 }
 function runStrategy(){
   if(stratBusy) return;
-  stratBusy = true;
   const token = document.getElementById('stMarket').value;
   const strategy = document.getElementById('stStrategy').value;
   const router = document.getElementById('stRouter').value==='llm' ? 'llm' : 'seq';
+  if(!token){
+    document.getElementById('stFinal').innerHTML='<div class="st-err">⚠ 请先在 Market 下拉里选择一个有效市场。若下拉为空，请打开 Markets 页 refresh 后再回到 Strategy。</div>';
+    return;
+  }
+  stratBusy = true;
   const btn = document.getElementById('stRun'); btn.disabled=true; btn.textContent='running…';
   document.getElementById('stFlow').innerHTML='';
   document.getElementById('stFinal').innerHTML='';

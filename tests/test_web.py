@@ -88,6 +88,12 @@ def test_lab_ui_uses_lab_api_contract():
     assert "qlib factor backtest · experimental" in html
     assert "点击任一 report 查看完整 EvaluationReport review" in html
     assert "Open Backtest workflow" in html
+    assert "确认数据" in html
+    assert "运行 evidence" in html
+    assert "查看 report" in html
+    assert "Supported Lab strategies" in html
+    assert "下一步：点 Run evidence" in html
+    assert "请先在 Market 下拉里选择一个有效市场" in html
     for strategy_id in (
         "linear-factor-v1",
         "market-naive-v1",
