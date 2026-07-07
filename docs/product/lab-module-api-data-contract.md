@@ -82,7 +82,7 @@ Times:
   "owner": "default",
   "statement": "Crypto news markets update slower than the model within 2 hours",
   "category_filter": "crypto",
-  "feature_set": ["news_sentiment", "orderbook_imbalance", "similar_markets"],
+  "feature_set": [],
   "prompt_version": "signal-v1",
   "model_version": "claude-sonnet-4",
   "snapshot_id": "snap_abc123",
@@ -96,6 +96,10 @@ Times:
   "updated_at": "2026-06-25T00:00:00Z"
 }
 ```
+
+`feature_set` is system-owned in the Lab UI. Users create the hypothesis and
+optional market/category scope; ingestion and strategy backtests detect which
+features are actually available from PIT-safe `DataStore.collections`.
 
 Valid states for MVP:
 
@@ -136,7 +140,9 @@ Validation:
 - `start < end`
 - `settled_only` must be true in MVP
 - `strategy_id` defaults to `linear-factor-v1`
-- allowed MVP strategies are `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
+- allowed MVP strategies are `market-naive-v1`, `linear-factor-v1`,
+  `momentum-v1`, `flow-imbalance-v1`, `microstructure-v1`, `sentiment-v1`,
+  and `contrarian-v1`
 - `pit_strict` defaults to true
 - `max_markets` must be between 1 and 500
 
@@ -224,7 +230,11 @@ Rules:
     "available_strategies": [
       "linear-factor-v1",
       "market-naive-v1",
-      "momentum-v1"
+      "momentum-v1",
+      "flow-imbalance-v1",
+      "microstructure-v1",
+      "sentiment-v1",
+      "contrarian-v1"
     ]
   },
   "market_universe": {
@@ -320,6 +330,49 @@ collection data already contains `lab.p_raw`, the report may mark the source as
 `snapshot_manifest` is the point-in-time evidence manifest for the sample. It
 lists the prediction time, latest known feature availability, and source fields
 used to reconstruct the historical snapshot.
+
+### 4.6 MonitorOpportunity
+
+Dry-run only opportunity candidates from active markets:
+
+```json
+{
+  "market_token_id": "token_yes",
+  "question": "Will BTC close above 100k?",
+  "strategy_id": "momentum-v1",
+  "p_raw": 0.66,
+  "p_cal": 0.61,
+  "market_price": 0.52,
+  "edge": 0.09,
+  "apy": 1.2,
+  "action": "buy",
+  "size_usdc": 25.0,
+  "dry_run": true,
+  "reasons": [],
+  "market": {
+    "condition_id": "0x...",
+    "outcome": "YES",
+    "volume_24h": 100000.0,
+    "liquidity": 25000.0,
+    "days_to_expiry": 10.0
+  },
+  "signal_model": {
+    "id": "momentum-v1",
+    "baseline": "market_price",
+    "feature_vector": {
+      "price_momentum": 0.2,
+      "flow_imbalance": 0.1
+    },
+    "feature_contributions": {
+      "price_momentum": 0.056,
+      "flow_imbalance": 0.006
+    }
+  }
+}
+```
+
+Monitor output must always keep `dry_run=true` and must not call paper or live
+execution endpoints.
 
 ## 5. Storage Contract
 
@@ -538,7 +591,37 @@ Returns an EvaluationReport.
 
 Response is the EvaluationReport schema.
 
-### 6.7 `GET /api/lab/system/status`
+### 6.7 `POST /api/lab/monitor/opportunities`
+
+Scans active markets with a selected Lab strategy. This endpoint is read-only
+and dry-run only.
+
+Request:
+
+```json
+{
+  "strategy_id": "momentum-v1",
+  "limit": 20,
+  "min_volume_24h": 5000.0,
+  "min_edge": 0.02,
+  "include_holds": true
+}
+```
+
+Response:
+
+```json
+{
+  "strategy_id": "momentum-v1",
+  "dry_run": true,
+  "n": 1,
+  "opportunities": [],
+  "message": "ok",
+  "errors": []
+}
+```
+
+### 6.8 `GET /api/lab/system/status`
 
 Read-only Lab view of System resources.
 

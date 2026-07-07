@@ -91,6 +91,94 @@ def _momentum_score(raw: dict, p_market: float) -> dict:
     }
 
 
+def _flow_score(raw: dict, p_market: float) -> dict:
+    weights = {
+        "flow_imbalance": 0.24,
+        "trade_count": 0.001,
+        "book_pressure": 0.04,
+    }
+    factors = _factors(raw)
+    feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
+    contributions = {
+        name: feature_vector[name] * float(weight)
+        for name, weight in weights.items()
+    }
+    score_delta = sum(contributions.values())
+    return {
+        "p_raw": _clip_probability(p_market + score_delta),
+        "score_delta": score_delta,
+        "feature_vector": feature_vector,
+        "feature_contributions": contributions,
+        "weights": weights,
+    }
+
+
+def _microstructure_score(raw: dict, p_market: float) -> dict:
+    weights = {
+        "book_pressure": 0.20,
+        "micro_vs_mid": 0.80,
+        "spread_bps": -0.0008,
+    }
+    factors = _factors(raw)
+    feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
+    contributions = {
+        name: feature_vector[name] * float(weight)
+        for name, weight in weights.items()
+    }
+    score_delta = sum(contributions.values())
+    return {
+        "p_raw": _clip_probability(p_market + score_delta),
+        "score_delta": score_delta,
+        "feature_vector": feature_vector,
+        "feature_contributions": contributions,
+        "weights": weights,
+    }
+
+
+def _sentiment_score(raw: dict, p_market: float) -> dict:
+    weights = {
+        "sentiment": 0.24,
+        "flow_imbalance": 0.05,
+        "price_momentum": 0.03,
+    }
+    factors = _factors(raw)
+    feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
+    contributions = {
+        name: feature_vector[name] * float(weight)
+        for name, weight in weights.items()
+    }
+    score_delta = sum(contributions.values())
+    return {
+        "p_raw": _clip_probability(p_market + score_delta),
+        "score_delta": score_delta,
+        "feature_vector": feature_vector,
+        "feature_contributions": contributions,
+        "weights": weights,
+    }
+
+
+def _contrarian_score(raw: dict, p_market: float) -> dict:
+    weights = {
+        "price_momentum": -0.18,
+        "flow_imbalance": -0.04,
+        "spread_bps": -0.0003,
+    }
+    factors = _factors(raw)
+    feature_vector = {name: float(factors.get(name, 0.0) or 0.0) for name in weights}
+    contributions = {
+        name: feature_vector[name] * float(weight)
+        for name, weight in weights.items()
+    }
+    score_delta = sum(contributions.values())
+    return {
+        "p_raw": _clip_probability(p_market + score_delta),
+        "score_delta": score_delta,
+        "feature_vector": feature_vector,
+        "feature_contributions": contributions,
+        "weights": weights,
+    }
+
+
 STRATEGIES: dict[str, LabStrategy] = {
     "market-naive-v1": LabStrategy(
         id="market-naive-v1",
@@ -112,6 +200,34 @@ STRATEGIES: dict[str, LabStrategy] = {
         source="deterministic_momentum_model",
         baseline="market_price",
         score=_momentum_score,
+    ),
+    "flow-imbalance-v1": LabStrategy(
+        id="flow-imbalance-v1",
+        description="Trade-flow strategy that follows buy/sell notional imbalance.",
+        source="deterministic_flow_model",
+        baseline="market_price",
+        score=_flow_score,
+    ),
+    "microstructure-v1": LabStrategy(
+        id="microstructure-v1",
+        description="Order-book strategy using pressure, micro-price and spread.",
+        source="deterministic_microstructure_model",
+        baseline="market_price",
+        score=_microstructure_score,
+    ),
+    "sentiment-v1": LabStrategy(
+        id="sentiment-v1",
+        description="Sentiment-led strategy with light market-flow confirmation.",
+        source="deterministic_sentiment_model",
+        baseline="market_price",
+        score=_sentiment_score,
+    ),
+    "contrarian-v1": LabStrategy(
+        id="contrarian-v1",
+        description="Mean-reversion strategy that fades sharp short-term moves.",
+        source="deterministic_contrarian_model",
+        baseline="market_price",
+        score=_contrarian_score,
     ),
 }
 

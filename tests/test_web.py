@@ -59,7 +59,8 @@ def test_server_app_has_routes():
     for p in ("/", "/api/chat", "/api/skills", "/api/mcp", "/api/portfolio",
               "/api/markets", "/api/backtest", "/api/lab/hypotheses",
               "/api/lab/hypotheses/{id}", "/api/lab/hypotheses/{id}/backtests",
-              "/api/lab/reports/{id}"):
+              "/api/lab/reports/{id}", "/api/lab/data/status",
+              "/api/lab/data/ingest", "/api/lab/monitor/opportunities"):
         assert p in paths
 
 
@@ -79,6 +80,37 @@ def test_lab_ui_uses_lab_api_contract():
     assert "signal_model" in html or "model=" in html
     assert "真实历史 collections" in html
     assert "样本量不足" in html
+    assert "Data ingestion · historical settled collections" in html
+    assert "Strategy-aware evidence backtest" in html
+    assert "Dry-run monitor · active opportunities" in html
+    assert "Reports · EvaluationReport ledger" in html
+    assert "Historical replay · resolved price history" in html
+    assert "qlib factor backtest · experimental" in html
+    assert "点击任一 report 查看完整 EvaluationReport review" in html
+    assert "Open Backtest workflow" in html
+    assert "auto-detected during backtest" in html
+    assert "auto-detected from collections" in html
+    assert "labNewFeatures" not in html
+    assert "确认数据" in html
+    assert "运行 evidence" in html
+    assert "查看 report" in html
+    assert "Supported Lab strategies" in html
+    assert "下一步：点 Run evidence" in html
+    assert "请先在 Market 下拉里选择一个有效市场" in html
+    for strategy_id in (
+        "linear-factor-v1",
+        "market-naive-v1",
+        "momentum-v1",
+        "flow-imbalance-v1",
+        "microstructure-v1",
+        "sentiment-v1",
+        "contrarian-v1",
+    ):
+        assert strategy_id in html
+    assert "labFetchJson('/api/lab/data/status')" in html
+    assert "labFetchJson('/api/lab/data/ingest'" in html
+    assert "labFetchJson('/api/lab/monitor/opportunities'" in html
+    assert "dry_run=true" in html
     assert "function labFetchJson" in html
     assert "labFetchJson('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html

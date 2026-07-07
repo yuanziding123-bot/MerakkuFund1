@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .backtest import BacktestRunner, PointInTimeError, momentum_signal, naive_signal
+from .monitor import LabMonitor, MonitorOpportunity, MonitorRequest
 from .schemas import (
     BacktestRequest,
     BacktestRunResult,
@@ -20,6 +21,9 @@ __all__ = [
     "CreateHypothesisResponse",
     "ForecastRecord",
     "HypothesisRecord",
+    "LabMonitor",
+    "MonitorOpportunity",
+    "MonitorRequest",
     "DEFAULT_STRATEGY_ID",
     "PointInTimeError",
     "STRATEGIES",

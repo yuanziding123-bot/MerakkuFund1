@@ -13,9 +13,12 @@ def test_lab_routes_are_registered():
 
     assert "/api/lab/hypotheses" in paths
     assert "/api/lab/hypotheses/{id}" in paths
+    assert "/api/lab/data/status" in paths
+    assert "/api/lab/data/ingest" in paths
     assert "/api/lab/hypotheses/{id}/backtests" in paths
     assert "/api/lab/backtests/{id}" in paths
     assert "/api/lab/reports/{id}" in paths
+    assert "/api/lab/monitor/opportunities" in paths
     assert "/api/lab/system/status" in paths
 
 
@@ -106,3 +109,71 @@ def test_lab_http_create_backtest_report_flow(tmp_path, monkeypatch):
 
     detail = client.get(f"/api/lab/hypotheses/{hypothesis_id}").json()
     assert detail["reports"][0]["id"] == report_id
+
+
+def test_lab_http_monitor_opportunities_is_dry_run(monkeypatch):
+    import polyagents.web.server as server
+    from fastapi.testclient import TestClient
+
+    class FakeMonitor:
+        def scan(self, request):
+            return {
+                "strategy_id": request.strategy_id,
+                "dry_run": True,
+                "n": 1,
+                "opportunities": [
+                    {
+                        "market_token_id": "yes-token",
+                        "question": "Will BTC close above 100k?",
+                        "strategy_id": request.strategy_id,
+                        "p_raw": 0.66,
+                        "p_cal": 0.61,
+                        "market_price": 0.52,
+                        "edge": 0.09,
+                        "apy": 1.2,
+                        "action": "buy",
+                        "size_usdc": 25.0,
+                        "dry_run": True,
+                        "reasons": [],
+                    }
+                ],
+                "message": "ok",
+                "errors": [],
+            }
+
+    monkeypatch.setattr(server, "LabMonitor", lambda: FakeMonitor())
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/lab/monitor/opportunities",
+        json={"strategy_id": "momentum-v1", "limit": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["strategy_id"] == "momentum-v1"
+    assert body["opportunities"][0]["dry_run"] is True
+    assert body["opportunities"][0]["action"] == "buy"
+
+
+def test_lab_http_data_status_and_ingest_contract(tmp_path, monkeypatch):
+    import polyagents.web.server as server
+    from fastapi.testclient import TestClient
+    from polyagents.ingestion.polymarket_ingest import IngestionStats
+
+    monkeypatch.setitem(server.DEFAULT_CONFIG, "db_path", str(tmp_path / "data.db"))
+    monkeypatch.setattr(
+        server,
+        "run_polymarket_ingestion",
+        lambda **kwargs: IngestionStats(fetched_markets=2, inserted=1, duplicates=1),
+    )
+    client = TestClient(server.app)
+
+    status = client.get("/api/lab/data/status")
+    assert status.status_code == 200
+    assert "collections" in status.json()
+
+    ingest = client.post("/api/lab/data/ingest", json={"limit": 2})
+    assert ingest.status_code == 200
+    assert ingest.json()["stats"]["inserted"] == 1

@@ -10,7 +10,8 @@ Selection (first match wins):
     ``ChatOpenAI`` pointed at ``DEEPSEEK_BASE_URL`` (default https://api.deepseek.com)
     with model ``DEEPSEEK_MODEL`` (default ``deepseek-chat``).
   * ``LLM_PROVIDER=openai`` with ``OPENAI_BASE_URL`` → generic OpenAI-compatible.
-  * otherwise → ``ChatAnthropic`` (the historical default).
+  * otherwise → ``ChatAnthropic`` (the historical default). Set
+    ``ANTHROPIC_BASE_URL`` to route Anthropic calls through a compatible gateway.
 
 ``model`` is the resolved Anthropic model id from the call site; it is used for
 the Anthropic path and ignored for OpenAI-compatible providers (which pin their
@@ -69,5 +70,8 @@ def build_chat_llm(model: str | None = None, temperature: float = 0.0):
     from langchain_anthropic import ChatAnthropic
     from polyagents.default_config import DEFAULT_CONFIG
 
-    return ChatAnthropic(model=model or DEFAULT_CONFIG["anthropic_model"],
-                         temperature=temperature)
+    return ChatAnthropic(
+        model=model or DEFAULT_CONFIG["anthropic_model"],
+        temperature=temperature,
+        base_url=os.getenv("ANTHROPIC_BASE_URL") or None,
+    )

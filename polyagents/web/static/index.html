@@ -188,6 +188,18 @@
   .verdict.noise{background:#2f2828;border:1px solid #4a3836;color:var(--red)}
   .chartbox{border:1px solid var(--hairline);background:var(--canvas-soft);border-radius:var(--radius-sm);padding:12px}
   .chartbox .t{color:var(--mute);font-size:12px;margin-bottom:6px}
+  .workflow{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .wf-step{border:1px solid var(--hairline);background:var(--canvas-soft);border-radius:var(--radius-sm);padding:12px;min-height:104px}
+  .wf-step .n{font:12px "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--primary);margin-bottom:7px}
+  .wf-step .t{font-weight:500;font-size:14px;margin-bottom:6px;color:var(--ink)}
+  .wf-step .d{font-size:12.5px;color:var(--mute);line-height:1.45}
+  .strategy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px}
+  .strategy-pill{border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:10px}
+  .strategy-pill b{display:block;font-size:13px;margin-bottom:5px}
+  .strategy-pill span{display:block;color:var(--mute);font-size:12px;line-height:1.4}
+  .next-hint{border:1px solid var(--toolline);background:var(--tool);border-radius:var(--radius-sm);padding:10px 12px;color:var(--body-strong);font-size:13px;line-height:1.5}
+  @media(max-width:900px){.workflow{grid-template-columns:1fr 1fr}}
+  @media(max-width:560px){.workflow{grid-template-columns:1fr}}
 
   /* ── strategy module ── */
   #strategyView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
@@ -357,6 +369,10 @@
   .lab-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px;margin:10px 0 14px}
   .lab-kv dt{color:var(--mute)} .lab-kv dd{margin:0;color:var(--ink);font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
   .v-pos{color:var(--green);font-weight:500} .v-neg{color:var(--red);font-weight:500}
+  .auto-field{min-width:260px;border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:9px 11px}
+  .auto-field .k{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .auto-field .v{color:var(--ink);font-size:13px;font-weight:500}
+  .auto-field .d{color:var(--mute);font-size:12px;margin-top:3px;line-height:1.35;text-transform:none;letter-spacing:0}
 
   /* ── composer skill picker ── */
   .composer{position:relative}
@@ -568,7 +584,11 @@
           <div class="panel-h"><span>New hypothesis</span><button onclick="hideLabCreate()">Cancel</button></div>
           <div class="st-controls" style="margin-bottom:12px">
             <label>Category <input id="labNewCategory" value="crypto" /></label>
-            <label>Features <input id="labNewFeatures" value="news_sentiment,similar_markets" /></label>
+            <div class="auto-field">
+              <div class="k">Features</div>
+              <div class="v">auto-detected during backtest</div>
+              <div class="d">Strategies read available factors from DataStore.collections; no manual feature input.</div>
+            </div>
           </div>
           <textarea id="labNewStatement" rows="3" placeholder="Hypothesis statement..." style="width:100%;box-sizing:border-box"></textarea>
           <div class="st-controls" style="justify-content:flex-end;margin-top:12px">
@@ -592,17 +612,6 @@
             <div class="panel-h" style="margin-top:14px">Lineage</div>
             <div id="labLineage"><div class="hist">—</div></div>
           </div>
-        </div>
-
-        <div class="panel" style="margin-top:16px">
-          <div class="panel-h"><span>Historical backtest · alpha over resolved markets <span class="mut" id="btSlice"></span></span></div>
-          <div class="st-controls" style="margin-bottom:12px">
-            <label>Signal <select id="btSignal"><option value="momentum">momentum</option><option value="naive">naive (=market)</option></select></label>
-            <label>Predict at <select id="btFrac"><option value="0.4">40%</option><option value="0.5" selected>50%</option><option value="0.6">60%</option></select></label>
-            <label>Max markets <select id="btMax"><option>20</option><option selected>30</option><option>50</option></select></label>
-            <button class="send" style="height:38px" id="btRun" onclick="runHistBacktest()">▶ Run backtest</button>
-          </div>
-          <div id="btResult"><div class="hist">对该 slice 的已结算市场做 PIT 历史回放,评 alpha(确定性价格 signal vs 市场基线 + bootstrap CI)。无 LLM 成本,数据充足。</div></div>
         </div>
 
         <div class="panel" style="margin-top:16px">
@@ -675,20 +684,89 @@
       </div>
 
       <div id="backtestView">
-        <div class="mkthead">qlib backtest · factor → model → backtest over the SQLite history (leakage-safe time split)
-          <span class="refresh" onclick="loadBacktest()">▶ run backtest</span></div>
-        <div id="btbody"><div class="hist">Click "run backtest". Needs candle history in the DB and the qlib venv.</div></div>
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Backtest</h1>
+            <p class="sk-lead">Lab workflow: real collections → strategy-aware backtest → dry-run monitor. Reports stay explicit about fixture fallback, sample size, and dry-run status.</p>
+          </div>
+        </div>
+
+        <div class="workflow" aria-label="Lab backtest workflow">
+          <div class="wf-step"><div class="n">01</div><div class="t">确认数据</div><div class="d">先看 Data ingestion 的 usable settled 数量。为 0 时点 Run ingestion。</div></div>
+          <div class="wf-step"><div class="n">02</div><div class="t">运行 evidence</div><div class="d">选择 hypothesis、strategy，Category 保持 all，然后点 Run evidence。</div></div>
+          <div class="wf-step"><div class="n">03</div><div class="t">查看 report</div><div class="d">结果会进入 Reports ledger，点击任一行在下方展开完整 EvaluationReport。</div></div>
+          <div class="wf-step"><div class="n">04</div><div class="t">再做 replay / monitor</div><div class="d">Historical replay 和 dry-run monitor 是辅助验证，不代表真实下单。</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h"><span>Data ingestion · historical settled collections</span><button onclick="loadLabDataStatus()">refresh</button></div>
+          <div class="cards" id="labDataCards"></div>
+          <div class="st-controls" style="margin-top:12px">
+            <label>Limit <select id="labIngestLimit"><option>20</option><option selected>100</option><option>200</option></select></label>
+            <button class="send" id="labIngestRun" onclick="runLabIngestion()">▶ Run ingestion</button>
+          </div>
+          <div id="labIngestResult"><div class="hist">真实 settled collections 会写入默认 DataStore，BacktestRunner 可直接消费。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Strategy-aware evidence backtest</span><span class="mut">Hypothesis → Forecasts → EvaluationReport</span></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Hypothesis <select id="labBtHypothesis"></select></label>
+            <label>Strategy <select id="labBtStrategy"></select></label>
+            <label>Category <input id="labBtCategory" value="all" /></label>
+            <button class="send" id="labBtRun" onclick="runLabBacktestFromPanel()">▶ Run evidence</button>
+          </div>
+          <div id="labStrategyCatalog"></div>
+          <div id="labBtPanelResult"><div class="next-hint">下一步：点 Run evidence。完成后看下方 Reports ledger 的最新一行；source 应优先显示 real collections，fixture fallback 只代表演示链路。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Dry-run monitor · active opportunities</span><span class="mut">no paper/live execution</span></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Strategy <select id="labMonStrategy"></select></label>
+            <label>Limit <select id="labMonLimit"><option>5</option><option selected>10</option><option>20</option></select></label>
+            <label>Min volume <input id="labMonVol" value="5000" /></label>
+            <label><input type="checkbox" id="labMonHolds" checked /> include holds</label>
+            <button class="send" id="labMonRun" onclick="runLabMonitor()">▶ Scan dry-run</button>
+          </div>
+          <div id="labMonitorResult"><div class="hist">扫描活跃市场，输出 dry_run=true 的 candidate 或 no opportunity，不触发下单。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Reports · EvaluationReport ledger</span><span class="mut" id="labReportCount">—</span></div>
+          <table class="mkt">
+            <thead><tr><th>Report</th><th>Hypothesis</th><th>Strategy</th><th>Source</th><th>n</th><th>Brier Δ</th><th>Fixture</th></tr></thead>
+            <tbody id="labReportBody"><tr><td colspan="7" class="hist">Reports load with hypotheses.</td></tr></tbody>
+          </table>
+          <div id="labReportReview" style="margin-top:12px"><div class="hist">点击任一 report 查看完整 EvaluationReport review。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Historical replay · resolved price history</span><span class="mut" id="btSlice"></span></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Signal <select id="btSignal"><option value="momentum">momentum</option><option value="naive">naive (=market)</option></select></label>
+            <label>Predict at <select id="btFrac"><option value="0.4">40%</option><option value="0.5" selected>50%</option><option value="0.6">60%</option></select></label>
+            <label>Max markets <select id="btMax"><option>20</option><option selected>30</option><option>50</option></select></label>
+            <button class="send" style="height:38px" id="btRun" onclick="runHistBacktest()">▶ Run replay</button>
+          </div>
+          <div id="btResult"><div class="hist">这是 resolved market price-history replay，独立于上方 EvaluationReport；样本不足会明确显示。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>qlib factor backtest · experimental</span><button onclick="loadBacktest()">▶ run qlib</button></div>
+          <div id="btbody"><div class="hist">独立的 factor→model time-split test。Accuracy 可能因样本很少而失真，是否有 edge 以 IC/Sharpe/return gate 为准。</div></div>
+        </div>
       </div>
 
       <div id="strategyView">
         <div class="st-top">
           <div>
             <h1 class="sk-title">Strategy</h1>
-            <p class="sk-lead">A supervisor (main agent) runs an <b>agent loop</b>, dispatching specialist sub-agents over the live engine. Watch them run end-to-end.</p>
+            <p class="sk-lead">Live agent loop preview. 这里运行 data / signal / risk 子代理；Lab 的 backtest 策略在 Backtest 页选择和评估。</p>
           </div>
         </div>
         <div class="st-controls">
-          <label>Market <select id="stMarket"><option value="">most active</option></select></label>
+          <label>Market <select id="stMarket"><option value="">loading markets…</option></select></label>
           <label>Strategy <select id="stStrategy">
             <option value="research">research · data only</option>
             <option value="signal">signal · data + signal</option>
@@ -701,7 +779,7 @@
           </select></label>
           <button class="send" id="stRun" onclick="runStrategy()">▶ Run</button>
         </div>
-        <div id="stHeader" class="st-header"></div>
+        <div id="stHeader" class="st-header">先等待 Market 下拉加载。若没有市场，请去 Markets 页 refresh 或稍后重试。</div>
         <div class="st-flow" id="stFlow"></div>
         <div id="stFinal"></div>
       </div>
@@ -1248,6 +1326,7 @@ function showView(v){
   if(v==='library'){ loadLibrary(); }
   if(labOn){ loadLabHypos(); }
   if(labOn && labSub==='strategy'){ loadStrategyMarkets(); }
+  if(labOn && labSub==='backtest'){ loadLabWorkflow(); }
 }
 function showLab(sub){
   labSub = sub;
@@ -1315,6 +1394,16 @@ async function loadEval(){
 
 // ---- Lab: hypothesis-centric sandbox (Lab API + SQLite evidence) ----
 let labHypos = [], labSelId = null, labDetails = {}, labReports = {};
+let labDataStatus = null;
+const LAB_STRATEGIES = [
+  ['linear-factor-v1','linear-factor-v1 · default','综合 sentiment / flow / book / momentum 的确定性因子模型。'],
+  ['market-naive-v1','market-naive-v1 · baseline','直接相信市场价格，用作所有策略的 baseline。'],
+  ['momentum-v1','momentum-v1','跟随历史价格动量，并用轻量 flow 确认。'],
+  ['flow-imbalance-v1','flow-imbalance-v1','根据买卖成交流和盘口压力寻找方向。'],
+  ['microstructure-v1','microstructure-v1','使用 book pressure、micro-price 与 spread 做微观结构信号。'],
+  ['sentiment-v1','sentiment-v1','以 sentiment 为主，叠加 flow 和 momentum。'],
+  ['contrarian-v1','contrarian-v1','均值回归/反动量，淡化短期过热走势。'],
+];
 function labBadge(s){ return `<span class="ob-badge ${s}">${esc(s)}</span>`; }
 function labMetric(m, key, fallback='—'){
   const v=m && m[key];
@@ -1348,7 +1437,7 @@ async function loadLabHypos(){
   try{
     const r = await labFetchJson('/api/lab/hypotheses');
     labHypos = r.items || [];
-    renderLabList(); renderLabTable(); renderLabMetrics();
+    renderLabList(); renderLabTable(); renderLabMetrics(); renderLabWorkflowSelectors(); renderLabReportLedger();
     if(labHypos.length){ selectLabHypo((labHypos.find(h=>h.id===labSelId)||labHypos[0]).id); }
     else {
       document.getElementById('labSelBody').innerHTML='<div class="hist">还没有假设 — 点 ＋ New hypothesis 创建。</div>';
@@ -1404,7 +1493,7 @@ function renderLabGates(h){
 function renderLabDetail(h){
   const rep=labLatestReport(h.id);
   const m=(rep && rep.metrics) || h.eval_summary || null;
-  const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'—';
+  const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'auto-detected from collections';
   const verdict=m && m.n>0
     ? ((m.beats_market || m.brier_delta>0)?`<span class="v-pos">BEATS MARKET</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`
       : `<span class="v-neg">NO EDGE</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`)
@@ -1417,7 +1506,7 @@ function renderLabDetail(h){
       `paper_ready: ${rep.gates&&rep.gates.paper_ready ? 'true' : 'false'} · pit_warnings: ${(rep.pit_warnings||[]).length}`
     : '尚无 EvaluationReport。';
   const reportBtns=((labDetails[h.id]&&labDetails[h.id].reports)||[]).slice(0,3).map(r=>
-    `<button onclick="openLabReport('${r.id}')">report · ${esc(r.id)}</button>`).join('');
+    `<button onclick="showLab('backtest');openLabReport('${r.id}')">review · ${esc(r.id)}</button>`).join('');
   document.getElementById('labSelBody').innerHTML=
     `<p style="margin:0 0 12px;color:var(--text)">"${esc(h.statement||'')}"</p>
      <dl class="lab-kv">
@@ -1427,11 +1516,11 @@ function renderLabDetail(h){
        <dt>feature_set</dt><dd>${esc(feats)}</dd>
        <dt>model_version</dt><dd>${esc(h.model_version||'—')}</dd>
      </dl>
-     <div class="panel-h" style="font-size:13px"><span>Evidence backtest · SQLite report</span>
-       <button class="send" style="height:30px;padding:0 12px" id="alphaBtn" onclick="runLabBacktest('${h.id}')">▶ Run evidence backtest</button></div>
+     <div class="panel-h" style="font-size:13px"><span>Latest EvaluationReport</span>
+       <button class="send" style="height:30px;padding:0 12px" onclick="showLab('backtest')">Open Backtest workflow</button></div>
      <div style="margin:0 0 10px;font-size:13px">${verdict}</div>
      <pre class="evalbox">${esc(bt)}</pre>
-     <div class="ob-promote" style="margin-top:12px">${reportBtns || '<span class="hist">report 会在 backtest 完成后出现在这里。</span>'}</div>`;
+     <div class="ob-promote" style="margin-top:12px">${reportBtns || '<span class="hist">report 会在 Backtest 页生成并 review。</span>'}</div>`;
 }
 function renderLabLineage(h){
   const ev=(h.lineage&&h.lineage.events)||[];
@@ -1464,6 +1553,101 @@ function renderLabMetrics(){
   document.getElementById('labMetrics').innerHTML=cards.map(c=>
     `<div class="card"><div class="k">${c[0]}</div><div class="v">${c[1]}</div><div class="hist" style="padding:0;margin-top:3px">${c[2]}</div></div>`).join('');
 }
+function currentLabStrategy(){
+  const panel=document.getElementById('labBtStrategy');
+  return (panel && panel.value) || 'linear-factor-v1';
+}
+function strategyOptions(selected='linear-factor-v1'){
+  return LAB_STRATEGIES.map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${esc(label)}</option>`).join('');
+}
+function renderLabStrategyCatalog(){
+  const el=document.getElementById('labStrategyCatalog');
+  if(!el) return;
+  el.innerHTML='<div class="hist" style="padding:0;margin:0 0 6px">Supported Lab strategies</div>'+
+    '<div class="strategy-grid">'+LAB_STRATEGIES.map(([id,label,desc])=>
+      `<div class="strategy-pill"><b>${esc(id)}</b><span>${esc(desc||label)}</span></div>`).join('')+'</div>';
+}
+function renderLabWorkflowSelectors(){
+  const sel=document.getElementById('labBtHypothesis');
+  if(!sel) return;
+  const prev=sel.value || labSelId || '';
+  sel.innerHTML=labHypos.length
+    ? labHypos.map(h=>`<option value="${esc(h.id)}">${esc((h.statement||h.id).slice(0,70))}</option>`).join('')
+    : '<option value="">No hypotheses</option>';
+  sel.value = labHypos.find(h=>h.id===prev) ? prev : (labSelId || (labHypos[0]&&labHypos[0].id) || '');
+  const cat=document.getElementById('labBtCategory');
+  if(cat && !cat.dataset.touched) cat.value = 'all';
+  const btStrategy=document.getElementById('labBtStrategy');
+  if(btStrategy && !btStrategy.dataset.loaded){ btStrategy.innerHTML=strategyOptions('linear-factor-v1'); btStrategy.dataset.loaded='1'; }
+  const monStrategy=document.getElementById('labMonStrategy');
+  if(monStrategy && !monStrategy.dataset.loaded){ monStrategy.innerHTML=strategyOptions('momentum-v1'); monStrategy.dataset.loaded='1'; }
+}
+function renderLabReportLedger(){
+  const body=document.getElementById('labReportBody');
+  if(!body) return;
+  const byId = {};
+  Object.values(labDetails).forEach(d => (d.reports||[]).forEach(r => { byId[r.id]=r; }));
+  Object.values(labReports).forEach(r => { if(r && r.id) byId[r.id]=r; });
+  const reports=Object.values(byId);
+  reports.sort((a,b)=>String(b.generated_at||'').localeCompare(String(a.generated_at||'')));
+  document.getElementById('labReportCount').textContent = reports.length + ' reports';
+  if(!reports.length){
+    body.innerHTML='<tr><td colspan="7" class="hist">No EvaluationReports yet.</td></tr>';
+    return;
+  }
+  body.innerHTML=reports.map(r=>{
+    const m=r.metrics||{}, cfg=r.backtest_config||{}, dq=r.data_quality||{}, uni=r.market_universe||{};
+    const fixture=dq.uses_fixture_data===true;
+    return `<tr onclick="openLabReport('${r.id}')">
+      <td class="mono">${esc(r.id)}</td>
+      <td class="mono">${esc(r.hypothesis_id||'—')}</td>
+      <td>${esc(cfg.strategy_id || cfg.signal_model_id || '—')}</td>
+      <td>${uni.source==='collections'?'<span class="v-pos">real collections</span>':(fixture?'<span class="v-neg">fixture</span>':esc(uni.source||'—'))}</td>
+      <td class="mono">${m.n ?? '—'}</td>
+      <td class="mono">${typeof m.brier_delta==='number'?m.brier_delta.toFixed(3):'—'}</td>
+      <td>${fixture?'<span class="v-neg">yes</span>':'no'}</td></tr>`;
+  }).join('');
+}
+async function loadLabWorkflow(){
+  renderLabWorkflowSelectors();
+  renderLabStrategyCatalog();
+  renderLabReportLedger();
+  await loadLabDataStatus();
+}
+async function loadLabDataStatus(){
+  const el=document.getElementById('labDataCards');
+  if(!el) return;
+  el.innerHTML='<div class="card"><div class="k">DataStore</div><div class="v">…</div><div class="hist" style="padding:0;margin-top:3px">loading</div></div>';
+  try{
+    labDataStatus=await labFetchJson('/api/lab/data/status');
+    const c=labDataStatus.counts||{}, col=labDataStatus.collections||{};
+    const cards=[
+      ['collections', col.total ?? c.collections ?? 0, `${col.usable_settled??0} usable settled`],
+      ['markets', c.markets ?? 0, 'stored metadata'],
+      ['candles', c.candles ?? 0, 'price history rows'],
+      ['trades', c.trades ?? 0, 'trade-flow rows'],
+    ];
+    el.innerHTML=cards.map(x=>`<div class="card"><div class="k">${x[0]}</div><div class="v">${x[1]}</div><div class="hist" style="padding:0;margin-top:3px">${x[2]}</div></div>`).join('');
+    document.getElementById('labIngestResult').innerHTML =
+      `<div class="hist">DB: <span class="mono">${esc(labDataStatus.db_path||'—')}</span> · unusable=${col.unresolved_or_unusable??0} · unknown_source=${col.unknown_source??0}</div>`;
+  }catch(e){
+    el.innerHTML='<div class="hist">⚠ '+esc(e.message||e)+'</div>';
+  }
+}
+async function runLabIngestion(){
+  const btn=document.getElementById('labIngestRun');
+  const out=document.getElementById('labIngestResult');
+  btn.disabled=true; btn.textContent='running…';
+  out.innerHTML='<div class="hist">Fetching resolved markets → prices-history → PIT collections…</div>';
+  try{
+    const limit=+(document.getElementById('labIngestLimit').value||100);
+    const r=await labFetchJson('/api/lab/data/ingest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
+    const s=r.stats||{};
+    out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}</pre>`;
+    await loadLabDataStatus();
+  }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent='▶ Run ingestion'; }
+}
 function showLabCreate(){
   const panel=document.getElementById('labCreatePanel');
   if(panel) panel.style.display='block';
@@ -1478,12 +1662,10 @@ async function submitLabHypothesis(){
   const stmt=(document.getElementById('labNewStatement').value||'').trim();
   if(!stmt){ document.getElementById('labNewStatement').focus(); return; }
   const cat=(document.getElementById('labNewCategory').value||'crypto').trim()||'crypto';
-  const features=(document.getElementById('labNewFeatures').value||'')
-    .split(',').map(s=>s.trim()).filter(Boolean);
   const btn=document.getElementById('labCreateSubmit'); btn.disabled=true; btn.textContent='creating…';
   try{
     const r=await labFetchJson('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
+      body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:[],
         prompt_version:'signal-v1', model_version:'claude-sonnet-4',
         lineage:{source:'manual:web', parents:[]}})});
     labSelId=r.id;
@@ -1500,29 +1682,56 @@ function defaultLabWindow(){
 }
 async function runLabBacktest(id){
   const h=labHypos.find(x=>x.id===id);
-  const btn=document.getElementById('alphaBtn'); if(btn){ btn.disabled=true; btn.textContent='running…'; }
-  document.getElementById('btResult').innerHTML='<div class="hist">正在生成 Forecasts → EvaluationReport → SQLite...</div>';
+  const btn=document.getElementById('labBtRun'); if(btn){ btn.disabled=true; btn.textContent='running…'; }
+  const review=document.getElementById('labReportReview')||document.getElementById('btResult');
+  if(review) review.innerHTML='<div class="hist">正在生成 Forecasts → EvaluationReport → SQLite...</div>';
   try{
-    const body={time_window:defaultLabWindow(), market_filter:{category:(h&&h.category_filter)||'crypto', settled_only:true},
+    const body={time_window:defaultLabWindow(), market_filter:{category:'all', settled_only:true},
       model_version:(h&&h.model_version)||'claude-sonnet-4', prompt_version:(h&&h.prompt_version)||'signal-v1',
-      calibrator_id:'shrink-to-market-v1', pit_strict:true, max_markets:100};
+      calibrator_id:'shrink-to-market-v1', strategy_id:currentLabStrategy(), pit_strict:true, max_markets:100};
     const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body)});
     const report=await labFetchJson('/api/lab/reports/'+encodeURIComponent(r.report_id));
     labReports[report.id]=report;
     await selectLabHypo(id);
+    renderLabReportLedger();
     renderLabReport(report);
   }catch(e){ alert(e.message||e); }
-  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Run evidence backtest'; } }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Run evidence'; } }
+}
+async function runLabBacktestFromPanel(){
+  const id=document.getElementById('labBtHypothesis').value || labSelId;
+  if(!id){ alert('No hypothesis selected'); return; }
+  const h=labHypos.find(x=>x.id===id);
+  const btn=document.getElementById('labBtRun');
+  const out=document.getElementById('labBtPanelResult');
+  btn.disabled=true; btn.textContent='running…';
+  out.innerHTML='<div class="hist">Generating Forecasts → EvaluationReport → SQLite…</div>';
+  try{
+    const body={time_window:defaultLabWindow(), market_filter:{category:(document.getElementById('labBtCategory').value||'all'), settled_only:true},
+      model_version:(h&&h.model_version)||'claude-sonnet-4', prompt_version:(h&&h.prompt_version)||'signal-v1',
+      calibrator_id:'shrink-to-market-v1', strategy_id:document.getElementById('labBtStrategy').value,
+      pit_strict:true, max_markets:100};
+    const r=await labFetchJson('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const report=await labFetchJson('/api/lab/reports/'+encodeURIComponent(r.report_id));
+    labReports[report.id]=report;
+    if(!labDetails[id]) labDetails[id]={reports:[]};
+    await selectLabHypo(id);
+    renderLabReportLedger();
+    renderLabReport(report);
+    out.innerHTML='<div class="hist">completed · report <span class="mono">'+esc(report.id)+'</span></div>';
+  }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent='▶ Run evidence'; }
 }
 async function openLabReport(id){
   try{
     const report=labReports[id] || await labFetchJson('/api/lab/reports/'+encodeURIComponent(id));
-    labReports[id]=report; renderLabReport(report);
+    labReports[id]=report; showLab('backtest'); renderLabReportLedger(); renderLabReport(report);
   }catch(e){ alert(e.message||e); }
 }
 function renderLabReport(rep){
   const m=rep.metrics||{};
+  const cfg=rep.backtest_config||{};
   const dq=rep.data_quality||{};
   const uni=rep.market_universe||{};
   const sc=rep.scorecard||{};
@@ -1541,8 +1750,9 @@ function renderLabReport(rep){
     `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
   const sample=(rep.market_sample||[]).slice(0,5).map(x=>
     `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}`).join('\n');
-  document.getElementById('btResult').innerHTML=
-    `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
+  const target=document.getElementById('labReportReview') || document.getElementById('btResult');
+  target.innerHTML=
+    `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · strategy=${esc(cfg.strategy_id||cfg.signal_model_id||'—')} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
     sampleNote + fixtureNote +
     `<pre class="evalbox">window: ${(rep.time_window&&rep.time_window.start)||'—'} → ${(rep.time_window&&rep.time_window.end)||'—'}\n`+
     `source: ${uni.source||'—'} · fixture: ${dq.uses_fixture_data===true} · fetched: ${uni.fetched_markets??'—'} · eligible: ${uni.eligible_markets??'—'} · skipped: category=${uni.skipped_by_category??0}, unresolved=${uni.skipped_unresolved??0}, pit=${uni.skipped_pit??0}\n`+
@@ -1552,14 +1762,51 @@ function renderLabReport(rep){
     `pit_warnings:\n${esc(warnings || '—')}\n`+
     `market_sample:\n${esc(sample || '—')}</pre>`;
 }
+async function runLabMonitor(){
+  const btn=document.getElementById('labMonRun');
+  const out=document.getElementById('labMonitorResult');
+  btn.disabled=true; btn.textContent='scanning…';
+  out.innerHTML='<div class="hist">Scanning active markets with selected strategy · dry_run=true…</div>';
+  try{
+    const body={
+      strategy_id:document.getElementById('labMonStrategy').value,
+      limit:+(document.getElementById('labMonLimit').value||10),
+      min_volume_24h:+(document.getElementById('labMonVol').value||0),
+      include_holds:document.getElementById('labMonHolds').checked,
+    };
+    const r=await labFetchJson('/api/lab/monitor/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    renderLabMonitor(r);
+  }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent='▶ Scan dry-run'; }
+}
+function renderLabMonitor(r){
+  const out=document.getElementById('labMonitorResult');
+  const opps=r.opportunities||[];
+  if(!opps.length){
+    out.innerHTML=`<div class="hist">dry_run=true · ${esc(r.message||'no opportunity')} · errors=${(r.errors||[]).length}</div>`;
+    return;
+  }
+  out.innerHTML=
+    `<div class="hist">strategy=${esc(r.strategy_id)} · dry_run=${r.dry_run===true} · candidates=${opps.length}</div>`+
+    `<table class="mkt"><thead><tr><th>Market</th><th>Action</th><th>p_cal</th><th>Price</th><th>Edge</th><th>APY</th><th>Size</th><th>Dry-run</th></tr></thead><tbody>`+
+    opps.map(o=>`<tr>
+      <td>${esc((o.question||o.market_token_id||'').slice(0,72))}</td>
+      <td>${o.action==='buy'?'<span class="v-pos">BUY</span>':(o.action==='sell'?'<span class="v-neg">SELL</span>':'HOLD')}</td>
+      <td class="mono">${Number(o.p_cal||0).toFixed(3)}</td>
+      <td class="mono">${Number(o.market_price||0).toFixed(3)}</td>
+      <td class="mono">${(Number(o.edge||0)*100).toFixed(1)}%</td>
+      <td class="mono">${(Number(o.apy||0)*100).toFixed(0)}%</td>
+      <td class="mono">$${fmt(o.size_usdc||0)}</td>
+      <td>${o.dry_run===true?'<span class="v-pos">true</span>':'<span class="v-neg">false</span>'}</td>
+    </tr>`).join('')+`</tbody></table>`;
+}
 async function runHistBacktest(){
-  const h=labHypos.find(x=>x.id===labSelId);
-  const cat=(h&&h.category_filter)||'';
+  const cat=(document.getElementById('labBtCategory') && document.getElementById('labBtCategory').value) || 'all';
   const btn=document.getElementById('btRun'); btn.disabled=true; btn.textContent='running…';
   document.getElementById('btResult').innerHTML='<div class="hist">回放已结算市场中…(逐个取价格历史,可能 10–30s)</div>';
   try{
     const r=await (await fetch('/api/backtest_replay',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({category:cat||null, signal:document.getElementById('btSignal').value,
+      body:JSON.stringify({category:cat==='all'?null:cat, signal:document.getElementById('btSignal').value,
         frac:+document.getElementById('btFrac').value, max_markets:+document.getElementById('btMax').value})})).json();
     if(r.error){ document.getElementById('btResult').innerHTML='<div class="st-err">⚠ '+esc(r.error)+'</div>'; return; }
     renderBtResult(r);
@@ -1664,14 +1911,25 @@ let stratBusy = false;
 async function loadStrategyMarkets(){
   const sel = document.getElementById('stMarket');
   if(sel.dataset.loaded) return;
+  sel.innerHTML='<option value="">loading markets…</option>';
+  sel.disabled=true;
   try{
     const rows = await (await fetch('/api/markets?limit=25')).json();
-    if(Array.isArray(rows)){
+    sel.innerHTML='';
+    if(Array.isArray(rows) && rows.some(r=>r.yes_token)){
       rows.forEach(r => { if(r.yes_token){ const o=document.createElement('option');
         o.value=r.yes_token; o.textContent=r.question.slice(0,70); sel.appendChild(o); } });
+      sel.disabled=false;
       sel.dataset.loaded = '1';
+      document.getElementById('stHeader').innerHTML='选择一个 market 后点 Run。Research 可本地演示；signal/full/trade 需要 API key。';
+    }else{
+      sel.innerHTML='<option value="">no active markets loaded</option>';
+      document.getElementById('stHeader').innerHTML='<span class="v-neg">没有可用 market。</span> 请先去 Markets 页 refresh，或确认 Polymarket 数据源可访问。';
     }
-  }catch(e){}
+  }catch(e){
+    sel.innerHTML='<option value="">market load failed</option>';
+    document.getElementById('stHeader').innerHTML='<span class="v-neg">Market 加载失败。</span> '+esc(e.message||e);
+  }
 }
 const ST_ICONS = {data:'D', signal:'S', risk:'R', execution:'X'};
 function stStep(agent){
@@ -1686,10 +1944,14 @@ function stStep(agent){
 }
 function runStrategy(){
   if(stratBusy) return;
-  stratBusy = true;
   const token = document.getElementById('stMarket').value;
   const strategy = document.getElementById('stStrategy').value;
   const router = document.getElementById('stRouter').value==='llm' ? 'llm' : 'seq';
+  if(!token){
+    document.getElementById('stFinal').innerHTML='<div class="st-err">⚠ 请先在 Market 下拉里选择一个有效市场。若下拉为空，请打开 Markets 页 refresh 后再回到 Strategy。</div>';
+    return;
+  }
+  stratBusy = true;
   const btn = document.getElementById('stRun'); btn.disabled=true; btn.textContent='running…';
   document.getElementById('stFlow').innerHTML='';
   document.getElementById('stFinal').innerHTML='';
@@ -1745,6 +2007,9 @@ async function loadBacktest(){
     const b = r.backtest || {}, s = r.summary || {};
     if(b.error){ el.innerHTML = '<div class="hist">⚠ '+esc(b.error)+' · DB: '+(s.candles||0)+' candles, '+(s.tokens||0)+' tokens</div>'; return; }
     const edge = (b.verdict||'').startsWith('edge');
+    const accuracyNote = b.accuracy >= 0.99
+      ? '<div class="hist" style="margin-top:8px">Accuracy 接近 100% 可能来自样本很少或类别不均衡；是否有 edge 以 IC / Sharpe / return gate 为准。</div>'
+      : '';
     const cards = [
       ['Accuracy', (b.accuracy*100).toFixed(1)+'%'],
       ['IC', (b.information_coefficient).toFixed(3)],
@@ -1756,7 +2021,8 @@ async function loadBacktest(){
       `<div class="verdict ${edge?'edge':'noise'}">${edge?'✅ ':'❌ '}${esc(b.verdict)}</div>`+
       `<div class="cards">${cards}</div>`+
       `<div class="chartbox"><div class="t">Equity curve — strategy on held-out test set (${b.engine}, ${b.test_samples} samples)</div>${sparkline(b.equity_curve||[])}</div>`+
-      `<div class="hist" style="margin-top:10px">DB: ${s.candles} candles across ${s.tokens} tokens · forward ${b.forward_bars} bars · time-split train/test (no leakage)</div>`;
+      accuracyNote+
+      `<div class="hist" style="margin-top:10px">DB: ${s.candles} candles across ${s.tokens} tokens · forward ${b.forward_bars} bars · time-split train/test (no leakage). This is separate from Lab EvaluationReport.</div>`;
   }catch(e){ el.innerHTML = '<div class="hist">⚠ '+e+'</div>'; }
 }
 function sparkline(vals){

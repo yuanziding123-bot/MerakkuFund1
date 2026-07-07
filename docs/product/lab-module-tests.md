@@ -22,10 +22,11 @@ Test layers:
 ### TC-LAB-001: Create Hypothesis
 
 Given the user is in Lab
-When they create a Hypothesis with statement, category filter, feature set, prompt version, and model version
+When they create a Hypothesis with statement and category filter
 Then the system creates a versioned Hypothesis in `draft` state
 And assigns `snapshot_id`
 And writes lineage
+And leaves feature selection to the ingestion / backtest pipeline
 And shows it in the Hypothesis list.
 
 ### TC-LAB-002: Import Hypothesis From Ask
@@ -54,10 +55,18 @@ And the Hypothesis latest `eval_summary` is updated.
 ### TC-LAB-004A: Run Strategy-Aware Backtest
 
 Given the same settled-market collections
-When the user runs `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
+When the user runs the Lab strategy registry
 Then each run writes an EvaluationReport with its `strategy_id`
 And `market-naive-v1` acts as the market-price baseline
 And non-baseline strategies expose feature vectors and feature contributions.
+
+### TC-LAB-004B: Dry-Run Monitor
+
+Given active markets and a selected strategy
+When the user scans monitor opportunities
+Then the response contains candidate opportunities or an explicit no-opportunity result
+And every opportunity has `dry_run=true`
+And no paper or live execution call is triggered.
 
 ### TC-LAB-005: Show EvaluationReport
 
