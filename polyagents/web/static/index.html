@@ -100,8 +100,36 @@
   .avatar{width:26px;height:26px;border-radius:var(--radius-sm);flex:0 0 26px;font-size:12px;display:flex;align-items:center;justify-content:center}
   .me .avatar{background:var(--user-msg);color:var(--body)}
   .ai .avatar{background:var(--primary);color:var(--on-primary);font-weight:500}
-  .bubble{padding:1px 0;white-space:pre-wrap;word-wrap:break-word;flex:1;line-height:1.6}
+  .bubble{padding:1px 0;white-space:pre-wrap;word-wrap:break-word;flex:1;line-height:1.6;min-width:0}
   .me .bubble{color:var(--body-strong)}
+
+  /* ── AI answer card + rendered markdown ── */
+  .ai .bubble.md{white-space:normal;background:var(--canvas-soft);border:1px solid var(--hairline);
+       border-radius:12px;padding:15px 18px;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+  .bubble.md>:first-child{margin-top:0} .bubble.md>:last-child{margin-bottom:0}
+  .bubble.md p{margin:.55em 0}
+  .bubble.md strong{color:var(--ink);font-weight:600}
+  .bubble.md em{font-style:italic;color:var(--body)}
+  .bubble.md a{color:var(--green);text-decoration:none;border-bottom:1px solid rgba(125,171,125,.42)}
+  .bubble.md a:hover{border-bottom-color:var(--green)}
+  .bubble.md code{font:12px "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--tool);
+       border:1px solid var(--toolline);border-radius:4px;padding:1px 5px}
+  .bubble.md pre{background:var(--tool);border:1px solid var(--toolline);border-radius:8px;padding:11px 13px;
+       overflow-x:auto;margin:.6em 0}
+  .bubble.md pre code{background:none;border:0;padding:0;font-size:12px;line-height:1.5;white-space:pre}
+  .bubble.md ul{margin:.5em 0;padding-left:20px} .bubble.md li{margin:.25em 0}
+  .bubble.md .md-tbl{border-collapse:collapse;width:100%;margin:.7em 0;font-size:12.5px;display:block;overflow-x:auto}
+  .bubble.md .md-tbl th{text-align:left;color:var(--mute);font-weight:500;font-size:11px;text-transform:uppercase;
+       letter-spacing:.4px;padding:7px 11px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+  .bubble.md .md-tbl td{padding:7px 11px;border-bottom:1px solid var(--hairline);
+       font:12px "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
+  .bubble.md .md-tbl tr:last-child td{border-bottom:0}
+  .bubble.md .md-tbl tbody tr:hover{background:rgba(0,0,0,.12)}
+  .bubble.md .md-note{color:var(--mute);font-size:12px;font-style:italic;border-left:2px solid var(--hairline);
+       padding-left:12px;margin:.7em 0}
+  .bubble.md p.md-title{font-size:15.5px;margin:.1em 0 .5em;padding-bottom:.45em;border-bottom:1px solid var(--hairline)}
+  .bubble.md p.md-sec{margin:.9em 0 .3em;padding-left:11px;border-left:2px solid var(--green)}
+  .bubble.md p.md-sec strong,.bubble.md p.md-title strong{color:var(--ink)}
   .tool{font:12px/1.5 "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--tooltext);
         background:var(--tool);border:1px solid var(--toolline);border-radius:var(--radius-sm);padding:5px 9px;margin:6px 0;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .tool .args{color:var(--body)}
@@ -1078,6 +1106,56 @@ function addTool(name, args){
 }
 function scroll(){ const c=document.getElementById('log'); c.scrollTop=c.scrollHeight; }
 
+// ---- lightweight markdown → HTML (matches what the kernel/domain answers emit) ----
+function mdInline(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function renderMd(src){
+  const L=(src||'').replace(/\r/g,'').split('\n'); let out=''; let i=0;
+  const isSep = s => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s) && s.includes('-');
+  const isTblHead = k => L[k].includes('|') && k+1<L.length && L[k+1].includes('|') && isSep(L[k+1]);
+  const cells = r => r.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(c=>c.trim());
+  while(i<L.length){
+    const line=L[i];
+    if(/^\s*```/.test(line)){                                   // fenced code
+      const code=[]; i++;
+      while(i<L.length && !/^\s*```/.test(L[i])){ code.push(L[i]); i++; }
+      i++; out+='<pre><code>'+esc(code.join('\n'))+'</code></pre>'; continue;
+    }
+    if(isTblHead(i)){                                           // pipe table
+      out+='<table class="md-tbl"><thead><tr>'+cells(line).map(c=>'<th>'+mdInline(c)+'</th>').join('')+'</tr></thead><tbody>';
+      i+=2;
+      while(i<L.length && L[i].includes('|') && !isSep(L[i])){
+        out+='<tr>'+cells(L[i]).map(c=>'<td>'+mdInline(c)+'</td>').join('')+'</tr>'; i++;
+      }
+      out+='</tbody></table>'; continue;
+    }
+    if(/^\s*[-*]\s+/.test(line)){                               // bullet list
+      out+='<ul>';
+      while(i<L.length && /^\s*[-*]\s+/.test(L[i])){ out+='<li>'+mdInline(L[i].replace(/^\s*[-*]\s+/,''))+'</li>'; i++; }
+      out+='</ul>'; continue;
+    }
+    if(line.trim()===''){ i++; continue; }
+    const note=line.trim().match(/^_(.+)_$/);                   // _muted note line_
+    if(note){ out+='<p class="md-note">'+mdInline(note[1])+'</p>'; i++; continue; }
+    const para=[line]; i++;                                     // paragraph (join wrapped lines)
+    while(i<L.length && L[i].trim()!=='' && !/^\s*```/.test(L[i])
+          && !/^\s*[-*]\s+/.test(L[i]) && !isTblHead(i)){ para.push(L[i]); i++; }
+    let cls='';
+    if(/^\*\*[①-⑳]/.test(para[0])) cls=' class="md-sec"';         // ①②③ section lead
+    else if(/^\*\*[^*]+\*\*(\s*·|\s*$)/.test(para[0]) && para.length===1) cls=' class="md-title"';
+    out+='<p'+cls+'>'+para.map(mdInline).join('<br>')+'</p>';
+  }
+  return out;
+}
+function renderBubble(bubble, text){
+  if(text && text.trim()){ bubble.classList.add('md'); bubble.innerHTML=renderMd(text); }
+  else bubble.textContent = text||'';
+}
+
 async function send(){
   const text = input.value.trim();
   const attIds = pendingAtt.filter(a=>a.id).map(a=>a.id);
@@ -1112,8 +1190,10 @@ async function send(){
         scroll();
       }
     }
-  }catch(e){ bubble.textContent=(acc||'')+'\n\n⚠ '+e; }
+  }catch(e){ acc=(acc||'')+'\n\n⚠ '+e; }
   if(cur.parentNode) cur.remove();
+  renderBubble(bubble, acc);                    // final: render markdown into the answer card
+  scroll();
   history.push({role:'assistant', content:acc});
   busy=false; sendBtn.disabled=false; input.focus();
   loadPortfolio();                              // refresh after each turn
