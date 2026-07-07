@@ -123,11 +123,17 @@ def _short(v: Any, n: int = 160) -> str:
 
 
 def _render_history(history, max_turns: int = 8) -> str:
-    """Compact transcript of the recent conversation (bounded, for prompt context)."""
+    """Compact transcript of the recent conversation (bounded, for prompt context).
+
+    The two most recent turns keep a much larger budget so a follow-up can actually
+    reference the prior result (e.g. 'backtest the strategies you just found') — a
+    kernel result board runs ~1–2k chars and was previously cut to 300."""
+    turns = list(history or [])[-max_turns:]
     lines = []
-    for role, content in (history or [])[-max_turns:]:
+    for i, (role, content) in enumerate(turns):
         who = "User" if str(role) == "user" else "Assistant"
-        lines.append(f"{who}: {_short(content, 300)}")
+        cap = 1600 if i >= len(turns) - 2 else 400      # recent turns fuller, older ones compact
+        lines.append(f"{who}: {_short(content, cap)}")
     return "\n".join(lines)
 
 
