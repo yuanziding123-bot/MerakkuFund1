@@ -824,6 +824,60 @@ def _format_alpha_hunt(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_backfill(a: dict, path: str) -> str:
+    """Render the outcome-backfill: how many stored snapshots got labelled."""
+    if a.get("error"):
+        return f"**结果回填 · backfill_outcomes** · {path}\n\n失败:{a['error']}"
+    c = a.get("store_counts") or {}
+    lines = [f"**结果回填 · backfill_outcomes** · {path}", "",
+             f"_库:**{a.get('backend')}**{'(云端)' if a.get('backend')=='postgres' else '(本地)'} · 主题:{a.get('query')}_"]
+    lines.append(f"\n扫了 **{a.get('scanned')}** 条已存快照:")
+    lines.append("\n| 结果 | 数量 |")
+    lines.append("|---|---|")
+    lines.append(f"| ✅ 本次新标注(已结算) | **{a.get('newly_labeled')}** |")
+    lines.append(f"| 之前已标注 | {a.get('already_labeled')} |")
+    lines.append(f"| ⏳ 尚未结算(留待下次) | {a.get('still_unresolved')} |")
+    lines.append(f"| **带标签总计(可回测)** | **{a.get('labeled_total')}** |")
+    lines.append(f"\n_库存:candles {c.get('candles','?')} · trades {c.get('trades','?')} · "
+                 f"collections {c.get('collections','?')}。已结算的快照现在能喂给 **lab_backtest**;"
+                 f"未结算的等它们收敛后再跑一次 backfill 即可增量标注。_")
+    return "\n".join(lines)
+
+
+def _format_lab_backtest(a: dict, path: str) -> str:
+    """Render the Lab feature-strategy backtest (EvaluationReport metrics + gates)."""
+    if a.get("error"):
+        return f"**Lab 回测 · lab_backtest** · {path}\n\n失败:{a['error']}"
+    g = a.get("gates") or {}
+    lines = [f"**Lab 回测 · lab_backtest** · {path}", "",
+             f"_策略:**{a.get('strategy_id')}** · 领域:{a.get('category')} · 样本 n={a.get('n')}_"]
+    if a.get("uses_fixture"):
+        lines.append("\n⚠️ **跑的是 fixture(占位数据)** —— 该领域还没有带标签的真实快照。"
+                     "先跑 **backfill_outcomes**(并让 collect 攒够已结算样本)再回来。")
+        return "\n".join(lines)
+    bd = a.get("brier_delta")
+    verdict = "跑赢市场 ✅" if isinstance(bd, (int, float)) and bd > 0 else "未跑赢市场"
+    lines.append(f"\n**评估(vs 市场基线)** · {verdict}")
+    lines.append("\n| 指标 | 值 |")
+    lines.append("|---|---|")
+    lines.append(f"| Brier Δ(越正越好) | {_fmt(bd)} |")
+    lines.append(f"| Brier(模型 / 市场) | {_fmt(a.get('brier_model'))} / {_fmt(a.get('brier_market'))} |")
+    lines.append(f"| ECE(校准误差,越低越好) | {_fmt(a.get('ece'))} |")
+    lines.append("\n**晋级门(paper-ready 判定)**")
+    lines.append("\n| 门 | 通过 |")
+    lines.append("|---|---|")
+    for k in ("sample_adequate", "beats_market", "ece_pass", "pit_clean", "paper_ready"):
+        if k in g:
+            lines.append(f"| {k} | {'✅' if g[k] else '❌'} |")
+    lines.append(f"\n_Lab 证据回测:{a.get('strategy_id')} 在带标签快照上 vs 市场基线,含 bootstrap CI + 校准 + 晋级门。"
+                 f"报告 id `{a.get('report_id')}` 已落 Lab 账本。想扩样本 → backfill_outcomes / 多攒 collect。_")
+    return "\n".join(lines)
+
+
+def _fmt(x) -> str:
+    return f"{x:+.4f}" if isinstance(x, (int, float)) else "—"
+
+
 def _format_opportunities(a: dict, path: str) -> str:
     """Render the Lab opportunity monitor: strategy-scored, ranked dry-run trades."""
     opps = a.get("opportunities") or []
@@ -1031,6 +1085,10 @@ def _kernel_summary(ctx) -> str:
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
         return _format_promotion(f["promotion_verdict"], path)
+    if "lab_backtest" in f:                              # Lab feature-strategy evidence backtest
+        return _format_lab_backtest(f["lab_backtest"], path)
+    if "outcome_backfill" in f:                          # labelled snapshots for the Lab backtest
+        return _format_backfill(f["outcome_backfill"], path)
     if "backtest_matrix" in f:                           # strategy × domain matrix
         return _format_backtest_matrix(f["backtest_matrix"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison

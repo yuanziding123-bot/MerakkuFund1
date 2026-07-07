@@ -41,6 +41,13 @@ PACKS: dict[str, dict] = {
         "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
         "capabilities": ["news_sentiment"],
     },
+    "lab-backtest": {
+        "name": "Lab 回测(特征策略 + 结果回填)",
+        "description": "先给已采集的市场快照回填结算结果(写入共享库,设了 POLYAGENTS_DATABASE_URL "
+                       "即云端 postgres),再用 Lab 的 7 个特征策略在带标签快照上跑完整回测"
+                       "(Brier vs 市场 + 校准 + 晋级门)。选中后 Ask 里可直接调用 Lab 回测。",
+        "capabilities": ["backfill_outcomes", "lab_backtest"],
+    },
     # NOTE: the old "strategy-supervisor" pack (data→signal→risk supervisor) was pruned —
     # analyze_market fully supersedes it (signal + sized decision + backtest + reflection).
     # The strategy capability stays defined for the non-kernel "strategy" mode.

@@ -273,6 +273,42 @@ def scan_opportunities_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"opportunities"}), run, cost=6)
 
 
+def backfill_outcomes_capability(fn: Callable) -> Capability:
+    """Label stored market snapshots with their realised outcome (pack: lab-backtest).
+
+    ``fn(query) -> dict`` walks the collection cache in the shared data store (cloud
+    Postgres when POLYAGENTS_DATABASE_URL is set, else local SQLite), looks up which of
+    those markets have since resolved, and writes ``lab.outcome`` (0/1) back — turning
+    accumulated snapshots into a labelled backtest set the Lab strategies can score."""
+    def run(ctx: Context) -> dict:
+        return {"outcome_backfill": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("backfill_outcomes",
+                      "Backfill realised outcomes onto stored market snapshots: find which "
+                      "collected markets have resolved and label them (writes to the shared "
+                      "cloud DB). Run this to feed the Lab backtest with real data. Use for "
+                      "'backfill outcomes', 'label the collected snapshots', 'prepare Lab data'.",
+                      frozenset({"question"}), frozenset({"outcome_backfill"}), run, cost=4)
+
+
+def lab_backtest_capability(fn: Callable) -> Capability:
+    """Run a Lab feature-strategy over the labelled snapshots (pack: lab-backtest).
+
+    ``fn(query) -> dict`` runs the colleague's ``BacktestRunner.run`` evidence path — a
+    chosen Lab strategy (linear-factor / momentum / flow / sentiment / …) scored over the
+    stored collection bundles with resolved outcomes — and returns the EvaluationReport
+    metrics + promotion gates. Needs backfill_outcomes to have labelled data first, else
+    it honestly reports it fell back to fixtures."""
+    def run(ctx: Context) -> dict:
+        return {"lab_backtest": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("lab_backtest",
+                      "Run the Lab's feature-based backtest: score a Lab strategy over the "
+                      "labelled market snapshots and return Brier vs market + calibration + "
+                      "promotion gates (paper-ready?). The deep evidence backtest, distinct "
+                      "from the candle-signal backtest_strategies. Use for 'run the Lab "
+                      "backtest', 'backtest strategy X with the Lab evidence path'.",
+                      frozenset({"question"}), frozenset({"lab_backtest"}), run, cost=6)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 

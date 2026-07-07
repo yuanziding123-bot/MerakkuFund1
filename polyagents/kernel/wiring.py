@@ -11,10 +11,12 @@ import math
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
+                           backfill_outcomes_capability,
                            backtest_capability, backtest_matrix_capability,
                            backtest_strategies_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
+                           lab_backtest_capability,
                            discover_markets_capability, domain_capability,
                            evaluate_skill_capability, hunt_alpha_capability,
                            microstructure_scan_capability, news_sentiment_capability,
@@ -292,6 +294,74 @@ def default_registry() -> list:
             return {"query": query, "n": 0, "opportunities": [],
                     "error": f"{type(exc).__name__}: {exc}"}
         return {"query": query, **out}
+
+    # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
+
+    def backfill_outcomes(query, limit=1000):
+        """Label stored collection snapshots with realised outcomes, so the Lab
+        feature-strategies can backtest on real data. Writes to eng.store — the
+        shared cloud Postgres when POLYAGENTS_DATABASE_URL is set, else local SQLite."""
+        from datetime import datetime, timezone
+        store = getattr(eng, "store", None)
+        if store is None:
+            return {"error": "no data store configured (persist_enabled=False?)"}
+        raw = eng.client.list_resolved_markets(limit=limit)      # token -> realised outcome
+        resolved = {m.token_id: (1 if m.price >= 0.5 else 0)
+                    for m in eng.client.to_markets(raw) if m.outcome == "YES"}
+        cols = store.fetch_collections(limit=limit)
+        now = datetime.now(timezone.utc).isoformat()
+        already = newly = unresolved = 0
+        for row in cols:
+            bundle = row.get("raw") or {}
+            lab = bundle.get("lab") or {}
+            if lab.get("outcome") is not None:
+                already += 1; continue
+            tok = row["token_id"]
+            if tok in resolved:
+                bundle = {**bundle, "lab": {**lab, "outcome": resolved[tok],
+                                            "outcome_source": "resolved_market", "labeled_at": now}}
+                store.record_collection(tok, row["as_of"], row.get("question") or "",
+                                        row.get("market_price") or 0.5, bundle)
+                newly += 1
+            else:
+                unresolved += 1
+        backend = "postgres" if getattr(store.engine, "dialect", None) and \
+            store.engine.dialect.name == "postgresql" else "sqlite"
+        return {"query": query, "backend": backend, "scanned": len(cols),
+                "already_labeled": already, "newly_labeled": newly,
+                "still_unresolved": unresolved, "labeled_total": already + newly,
+                "store_counts": store.counts()}
+
+    def lab_backtest(query):
+        """Run the colleague's Lab evidence backtest: a Lab feature-strategy scored over
+        the labelled collection snapshots -> EvaluationReport metrics + promotion gates."""
+        from datetime import datetime, timezone
+        from polyagents.lab.backtest import BacktestRunner, get_report
+        from polyagents.lab.schemas import BacktestRequest
+        from polyagents.lab.strategies import DEFAULT_STRATEGY_ID, STRATEGIES
+        q = (query or "").lower()
+        sid = next((s for s in STRATEGIES if any(len(w) >= 4 and w in s for w in q.split())),
+                   DEFAULT_STRATEGY_ID)
+        cat = categorize(query or "")
+        req = BacktestRequest(
+            hypothesis_id=f"ask_{abs(hash(query)) % 10**8}",
+            time_window={"start": "2000-01-01T00:00:00+00:00",
+                         "end": datetime.now(timezone.utc).isoformat()},
+            market_filter={"category": cat if cat != "other" else "all", "settled_only": True},
+            model_version="ask", prompt_version="ask", calibrator_id="market",
+            strategy_id=sid, pit_strict=False, max_markets=200)
+        try:
+            result = BacktestRunner(client=eng.client, store=getattr(eng, "store", None)).run(req)
+        except Exception as exc:
+            return {"query": query, "strategy_id": sid, "error": f"{type(exc).__name__}: {exc}"}
+        report = get_report(result.report_id) or {}
+        m = report.get("metrics", {}) or {}
+        dq = report.get("data_quality", {}) or {}
+        return {"query": query, "strategy_id": sid, "category": cat,
+                "n": result.forecast_count, "uses_fixture": bool(dq.get("uses_fixture_data")),
+                "brier_delta": m.get("brier_delta"), "brier_model": m.get("brier_model"),
+                "brier_market": m.get("brier_market"), "ece": m.get("ece"),
+                "gates": report.get("gates"), "report_id": result.report_id}
 
     # ----- vertical pack capabilities: news-events / microstructure ----------
 
@@ -684,6 +754,8 @@ def default_registry() -> list:
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
         scan_opportunities_capability(scan_opportunities),
+        backfill_outcomes_capability(backfill_outcomes),
+        lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),
         portfolio_review_capability(portfolio_review),
         paper_trade_capability(paper_trade),
