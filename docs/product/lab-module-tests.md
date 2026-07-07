@@ -22,10 +22,11 @@ Test layers:
 ### TC-LAB-001: Create Hypothesis
 
 Given the user is in Lab
-When they create a Hypothesis with statement, category filter, feature set, prompt version, and model version
+When they create a Hypothesis with statement and category filter
 Then the system creates a versioned Hypothesis in `draft` state
 And assigns `snapshot_id`
 And writes lineage
+And leaves feature selection to the ingestion / backtest pipeline
 And shows it in the Hypothesis list.
 
 ### TC-LAB-002: Import Hypothesis From Ask

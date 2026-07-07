@@ -341,6 +341,10 @@
   .lab-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px;margin:10px 0 14px}
   .lab-kv dt{color:var(--mute)} .lab-kv dd{margin:0;color:var(--ink);font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
   .v-pos{color:var(--green);font-weight:500} .v-neg{color:var(--red);font-weight:500}
+  .auto-field{min-width:260px;border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:9px 11px}
+  .auto-field .k{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .auto-field .v{color:var(--ink);font-size:13px;font-weight:500}
+  .auto-field .d{color:var(--mute);font-size:12px;margin-top:3px;line-height:1.35;text-transform:none;letter-spacing:0}
 
   /* ── composer skill picker ── */
   .composer{position:relative}
@@ -545,7 +549,11 @@
           <div class="panel-h"><span>New hypothesis</span><button onclick="hideLabCreate()">Cancel</button></div>
           <div class="st-controls" style="margin-bottom:12px">
             <label>Category <input id="labNewCategory" value="crypto" /></label>
-            <label>Features <input id="labNewFeatures" value="news_sentiment,similar_markets" /></label>
+            <div class="auto-field">
+              <div class="k">Features</div>
+              <div class="v">auto-detected during backtest</div>
+              <div class="d">Strategies read available factors from DataStore.collections; no manual feature input.</div>
+            </div>
           </div>
           <textarea id="labNewStatement" rows="3" placeholder="Hypothesis statement..." style="width:100%;box-sizing:border-box"></textarea>
           <div class="st-controls" style="justify-content:flex-end;margin-top:12px">
@@ -1372,7 +1380,7 @@ function renderLabGates(h){
 function renderLabDetail(h){
   const rep=labLatestReport(h.id);
   const m=(rep && rep.metrics) || h.eval_summary || null;
-  const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'—';
+  const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'auto-detected from collections';
   const verdict=m && m.n>0
     ? ((m.beats_market || m.brier_delta>0)?`<span class="v-pos">BEATS MARKET</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`
       : `<span class="v-neg">NO EDGE</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`)
@@ -1541,12 +1549,10 @@ async function submitLabHypothesis(){
   const stmt=(document.getElementById('labNewStatement').value||'').trim();
   if(!stmt){ document.getElementById('labNewStatement').focus(); return; }
   const cat=(document.getElementById('labNewCategory').value||'crypto').trim()||'crypto';
-  const features=(document.getElementById('labNewFeatures').value||'')
-    .split(',').map(s=>s.trim()).filter(Boolean);
   const btn=document.getElementById('labCreateSubmit'); btn.disabled=true; btn.textContent='creating…';
   try{
     const r=await labFetchJson('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
+      body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:[],
         prompt_version:'signal-v1', model_version:'claude-sonnet-4',
         lineage:{source:'manual:web', parents:[]}})});
     labSelId=r.id;

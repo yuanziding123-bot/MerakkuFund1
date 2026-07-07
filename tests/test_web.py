@@ -88,6 +88,9 @@ def test_lab_ui_uses_lab_api_contract():
     assert "qlib factor backtest · experimental" in html
     assert "点击任一 report 查看完整 EvaluationReport review" in html
     assert "Open Backtest workflow" in html
+    assert "auto-detected during backtest" in html
+    assert "auto-detected from collections" in html
+    assert "labNewFeatures" not in html
     assert "确认数据" in html
     assert "运行 evidence" in html
     assert "查看 report" in html

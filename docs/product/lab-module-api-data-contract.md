@@ -82,7 +82,7 @@ Times:
   "owner": "default",
   "statement": "Crypto news markets update slower than the model within 2 hours",
   "category_filter": "crypto",
-  "feature_set": ["news_sentiment", "orderbook_imbalance", "similar_markets"],
+  "feature_set": [],
   "prompt_version": "signal-v1",
   "model_version": "claude-sonnet-4",
   "snapshot_id": "snap_abc123",
@@ -96,6 +96,10 @@ Times:
   "updated_at": "2026-06-25T00:00:00Z"
 }
 ```
+
+`feature_set` is system-owned in the Lab UI. Users create the hypothesis and
+optional market/category scope; ingestion and strategy backtests detect which
+features are actually available from PIT-safe `DataStore.collections`.
 
 Valid states for MVP:
 
