@@ -83,9 +83,23 @@ Lab 回测链路已经从 fixture/demo 数据推进到真实已结算 Polymarket
 ### 暂缓内容
 
 - 历史 orderbook 重建暂缓。
-- 历史 news 重建暂缓。
 
-原因：Phase 1 当前优先目标是打通真实 settled collections 和 BacktestRunner 消费链路；trades_flow 已经能增强样本的市场行为特征，orderbook/news 后续可作为 Phase 1.6/1.7 增量补充。
+### Phase 1.6: PIT-Safe Historical News MVP
+
+已补充 historical news ingestion MVP：
+
+- 使用 news API 的历史日期窗口搜索。
+- 每条新闻必须有可解析发布时间。
+- 严格要求 conservative `available_at <= prediction_time`。
+- 没有发布时间的新闻、发布时间晚于 prediction time 的新闻不会进入真实 backtest。
+- 只有日期、没有具体时间的新闻按当天结束才可用，避免同日未来信息泄漏。
+- `EvaluationReport.market_sample` 现在会展示 `news_evidence`：
+  - 使用了几条 PIT-clean news。
+  - mean sentiment / label。
+  - skipped_future / skipped_no_published。
+  - 样本首条 headline。
+
+这使前端 report review 不只看到 `sentiment=0.35` 这样的数字，也能看到该 sentiment 来自哪些历史新闻，以及哪些新闻因为 PIT 风险被剔除。
 
 ## Phase 2: Strategy-Aware Backtest
 
@@ -165,7 +179,8 @@ momentum-v1       n=46 source=collections fixture=false
 
 - 当前 ingestion MVP 只构造 YES-token 样本。
 - 当前 prediction policy 使用价格序列 50% 位置，后续可增加多 prediction_time replay。
-- 历史 orderbook/news 尚未重建。
+- 历史 orderbook 尚未重建。
+- historical news 已有 PIT-safe MVP，但依赖新闻 API 的 historical coverage 和 published timestamp 质量；未带时间戳或晚于 prediction_time 的新闻会被跳过。
 - 样本量目前为 46 条可用 settled collections，已能 demo 真实链路，但仍需要扩大数据覆盖。
 - `tests/test_web_kernel_mode.py` 在当前 Codex 沙盒中仍会失败，因为新 main 的 SQLAlchemy audit/storage 默认路径指向 `/Users/haoyingwang/.polyagents/cache/aihf.db`，沙盒无法打开该路径。该问题不影响 Lab ingestion 或 strategy-aware backtest，但建议后续将测试环境 DB path 显式指向 `tmp_path` 或加入 fallback。
 
@@ -185,4 +200,4 @@ momentum-v1       n=46 source=collections fixture=false
 
 - 增加更多 resolved markets。
 - 支持多 prediction_time。
-- 后续补历史 orderbook/news，提升 feature completeness。
+- 后续补历史 orderbook，并继续提高 historical news 数据源覆盖、去重和 query quality。

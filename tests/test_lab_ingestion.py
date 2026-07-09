@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from polyagents.dataflows.types import Candle
+from polyagents.dataflows.news import NewsItem
 from polyagents.ingestion import (
     HistoricalCollectionsIngestor,
     build_historical_collection,
@@ -65,6 +66,18 @@ class _FakeClient:
 
     def fetch_market_trades(self, condition_id, min_ts=None, max_pages=25):
         return self.trades.get(condition_id, [])
+
+
+class _FakeNewsClient:
+    enabled = True
+
+    def __init__(self, items):
+        self.items = items
+        self.calls = []
+
+    def search_between(self, query, *, start, end, max_results=5):
+        self.calls.append({"query": query, "start": start, "end": end, "max_results": max_results})
+        return self.items[:max_results]
 
 
 def _hypothesis(repo):
@@ -147,6 +160,97 @@ def test_collection_generation_rebuilds_historical_trades_flow():
     assert collection["raw"]["features"]["factors"]["flow_imbalance"] == flow["flow_imbalance"]
 
 
+def test_collection_generation_adds_only_pit_safe_news_sentiment():
+    market, _ = parse_settled_binary_market(_raw_market())
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support after bullish rally",
+            url="https://example.com/old",
+            snippet="strong gains confirmed",
+            published="2026-01-01T03:00:00Z",
+        ),
+        NewsItem(
+            title="Future warning",
+            url="https://example.com/future",
+            snippet="risk after prediction",
+            published="2026-01-01T06:00:00Z",
+        ),
+        NewsItem(
+            title="Undated bullish headline",
+            url="https://example.com/undated",
+            snippet="wins",
+            published=None,
+        ),
+    ])
+
+    collection, reason = build_historical_collection(
+        market,
+        _candles(10),
+        news_client=news,
+        min_history=4,
+    )
+
+    raw_news = collection["raw"]["news"]
+    assert reason is None
+    assert news.calls[0]["start"] == _T0
+    assert news.calls[0]["end"] == _T0 + timedelta(hours=5)
+    assert raw_news["n_items"] == 1
+    assert raw_news["skipped_future"] == 1
+    assert raw_news["skipped_no_published"] == 1
+    assert raw_news["items"][0]["available_at"] == "2026-01-01T03:00:00Z"
+    assert collection["raw"]["features"]["factors"]["sentiment"] > 0
+    assert collection["raw"]["lab"]["available_at_max"] < collection["as_of"]
+
+
+def test_collection_generation_treats_date_only_news_as_end_of_day():
+    market, _ = parse_settled_binary_market(_raw_market())
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/date",
+            snippet="bullish",
+            published="2026-01-01",
+        ),
+    ])
+
+    collection, reason = build_historical_collection(
+        market,
+        _candles(10),
+        news_client=news,
+        min_history=4,
+    )
+
+    raw_news = collection["raw"]["news"]
+    assert reason is None
+    assert raw_news["n_items"] == 0
+    assert raw_news["skipped_future"] == 1
+    assert collection["raw"]["features"]["factors"]["sentiment"] == 0.0
+
+
+def test_collection_generation_accepts_rfc_news_publish_dates():
+    market, _ = parse_settled_binary_market(_raw_market())
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/rfc",
+            snippet="bullish",
+            published="Thu, 01 Jan 2026 03:00:00 GMT",
+        ),
+    ])
+
+    collection, reason = build_historical_collection(
+        market,
+        _candles(10),
+        news_client=news,
+        min_history=4,
+    )
+
+    raw_news = collection["raw"]["news"]
+    assert reason is None
+    assert raw_news["n_items"] == 1
+    assert raw_news["items"][0]["available_at"] == "2026-01-01T03:00:00Z"
+
+
 def test_collection_generation_skips_when_history_is_too_short():
     market, _ = parse_settled_binary_market(_raw_market())
     collection, reason = build_historical_collection(market, _candles(4), min_history=4)
@@ -174,6 +278,58 @@ def test_ingestion_inserts_and_deduplicates_collections(tmp_path):
     assert store.counts()["collections"] == 1
     assert store.counts()["trades"] == 1
     assert store.collection_exists("yes-token", "2026-01-01T05:00:00Z")
+    store.close()
+
+
+def test_ingestion_stats_include_historical_news_counts(tmp_path):
+    store = DataStore(tmp_path / "data.db")
+    client = _FakeClient([_raw_market()], {"yes-token": _candles(10)})
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/old",
+            snippet="bullish rally",
+            published="2026-01-01T03:00:00Z",
+        ),
+        NewsItem(
+            title="Future risk",
+            url="https://example.com/future",
+            snippet="warning",
+            published="2026-01-01T09:00:00Z",
+        ),
+    ])
+
+    stats = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
+
+    assert stats.inserted == 1
+    assert stats.news_items_used == 1
+    assert stats.news_items_skipped_future == 1
+    store.close()
+
+
+def test_ingestion_refreshes_duplicate_collections_with_news(tmp_path):
+    store = DataStore(tmp_path / "data.db")
+    client = _FakeClient([_raw_market()], {"yes-token": _candles(10)})
+
+    first = HistoricalCollectionsIngestor(client=client, store=store).run(limit=10)
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/old",
+            snippet="bullish rally",
+            published="2026-01-01T03:00:00Z",
+        ),
+    ])
+    second = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
+    [collection] = store.fetch_collections()
+
+    assert first.inserted == 1
+    assert second.duplicates == 1
+    assert second.updated_duplicates == 1
+    assert second.inserted == 0
+    assert collection["raw"]["news"]["n_items"] == 1
+    assert collection["raw"]["features"]["factors"]["sentiment"] > 0
+    assert store.counts()["collections"] == 1
     store.close()
 
 

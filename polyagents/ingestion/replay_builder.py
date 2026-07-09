@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from polyagents.dataflows.types import Candle, Market
 from polyagents.dataflows.utils import parse_iso, parse_json_field
 
-from .feature_builder import build_historical_trades_flow, build_price_raw
+from .feature_builder import build_historical_news_sentiment, build_historical_trades_flow, build_price_raw
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -99,6 +99,8 @@ def build_historical_collection(
     candles: list[Candle],
     *,
     trades: list[dict] | None = None,
+    news_client=None,
+    news_max_results: int = 5,
     min_history: int = 4,
     prediction_policy: str = "midpoint",
 ) -> tuple[dict | None, str | None]:
@@ -122,12 +124,26 @@ def build_historical_collection(
         max_ts=int(prediction_time.timestamp()),
         available_at=available_at,
     )
-    raw = build_price_raw(pit_candles, available_at=available_at, trades_flow=trades_flow)
-    raw["available_at_max"] = _iso(available_at)
+    news = None
+    if news_client is not None and getattr(news_client, "enabled", False):
+        news_items = news_client.search_between(
+            market.question,
+            start=pit_candles[0].ts,
+            end=prediction_time,
+            max_results=news_max_results,
+        )
+        news = build_historical_news_sentiment(news_items, prediction_time=prediction_time)
+    raw = build_price_raw(pit_candles, available_at=available_at, trades_flow=trades_flow, news=news)
+    availability = [available_at]
+    news_available = parse_iso((news or {}).get("available_at"))
+    if news_available is not None:
+        availability.append(news_available)
+    available_at_max = max(availability)
+    raw["available_at_max"] = _iso(available_at_max)
     raw["lab"] = {
         "outcome": market.outcome,
         "p_market": market_price,
-        "available_at_max": _iso(available_at),
+        "available_at_max": _iso(available_at_max),
         "ingestion_source": "polymarket_closed_markets",
         "prediction_policy": prediction_policy,
         "resolution_time": _iso(market.resolution_time),

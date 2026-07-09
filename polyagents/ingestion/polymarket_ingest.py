@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, dataclass
 
 from polyagents.dataflows.polymarket_client import PolymarketDataClient
+from polyagents.dataflows.news import NewsClient
 from polyagents.default_config import DEFAULT_CONFIG
 from polyagents.storage.db import DataStore
 
@@ -17,10 +18,14 @@ class IngestionStats:
     fetched_markets: int = 0
     inserted: int = 0
     duplicates: int = 0
+    updated_duplicates: int = 0
     skipped_no_outcome: int = 0
     skipped_no_price_history: int = 0
     skipped_pit: int = 0
     skipped_non_binary: int = 0
+    news_items_used: int = 0
+    news_items_skipped_no_published: int = 0
+    news_items_skipped_future: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -33,15 +38,17 @@ class IngestionStats:
 class HistoricalCollectionsIngestor:
     """Build PIT-safe settled-market collections for ``BacktestRunner.run``."""
 
-    def __init__(self, *, client, store: DataStore) -> None:
+    def __init__(self, *, client, store: DataStore, news_client=None) -> None:
         self.client = client
         self.store = store
+        self.news_client = news_client
 
     def run(
         self,
         *,
         limit: int = 100,
         min_history: int = 4,
+        news_max_results: int = 5,
         prediction_policy: str = "midpoint",
     ) -> IngestionStats:
         stats = IngestionStats()
@@ -60,15 +67,23 @@ class HistoricalCollectionsIngestor:
                 market,
                 candles,
                 trades=trades,
+                news_client=self.news_client,
+                news_max_results=news_max_results,
                 min_history=min_history,
                 prediction_policy=prediction_policy,
             )
             if collection is None:
                 stats.bump(reason)
                 continue
+            news = (collection["raw"].get("news") or {})
+            stats.news_items_used += int(news.get("n_items") or 0)
+            stats.news_items_skipped_no_published += int(news.get("skipped_no_published") or 0)
+            stats.news_items_skipped_future += int(news.get("skipped_future") or 0)
             if self.store.collection_exists(collection["token_id"], collection["as_of"]):
                 stats.duplicates += 1
-                continue
+                stats.updated_duplicates += 1
+            else:
+                stats.inserted += 1
             self.store.record_market(market.to_market(), fetched_at=market.resolution_time.isoformat())
             self.store.record_collection(
                 collection["token_id"],
@@ -77,7 +92,6 @@ class HistoricalCollectionsIngestor:
                 collection["market_price"],
                 collection["raw"],
             )
-            stats.inserted += 1
         return stats
 
 
@@ -87,15 +101,18 @@ def run_polymarket_ingestion(
     db_path: str | None = None,
     limit: int = 100,
     min_history: int = 4,
+    news_max_results: int | None = None,
     prediction_policy: str = "midpoint",
 ) -> IngestionStats:
     cfg = dict(config or DEFAULT_CONFIG)
     store = DataStore(db_path or cfg["db_path"])
     client = PolymarketDataClient.from_config(cfg)
+    news_client = NewsClient(cfg.get("tavily_api_key"))
     try:
-        return HistoricalCollectionsIngestor(client=client, store=store).run(
+        return HistoricalCollectionsIngestor(client=client, store=store, news_client=news_client).run(
             limit=limit,
             min_history=min_history,
+            news_max_results=news_max_results or int(cfg.get("news_max_results", 5)),
             prediction_policy=prediction_policy,
         )
     finally:
@@ -107,6 +124,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest resolved Polymarket markets into Lab collections.")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--min-history", type=int, default=4)
+    parser.add_argument("--news-max-results", type=int, default=None)
     parser.add_argument("--prediction-policy", default="midpoint")
     parser.add_argument("--db-path", default=None)
     args = parser.parse_args()
@@ -114,6 +132,7 @@ def main() -> None:
         db_path=args.db_path,
         limit=args.limit,
         min_history=args.min_history,
+        news_max_results=args.news_max_results,
         prediction_policy=args.prediction_policy,
     )
     print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))

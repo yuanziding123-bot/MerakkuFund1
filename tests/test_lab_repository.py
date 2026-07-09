@@ -90,6 +90,23 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
                     "price_momentum": 0.05,
                 }
             },
+            "news": {
+                "source": "historical_news",
+                "n_items": 1,
+                "sentiment": {"mean": 0.4, "label": "bullish"},
+                "available_at": "2026-04-01T00:00:00Z",
+                "skipped_no_published": 2,
+                "skipped_future": 1,
+                "items": [
+                    {
+                        "title": "Bitcoin bullish rally confirmed",
+                        "url": "https://example.com/news",
+                        "published": "2026-04-01T00:00:00Z",
+                        "available_at": "2026-04-01T00:00:00Z",
+                        "sentiment": 0.4,
+                    }
+                ],
+            },
             "lab": {"outcome": 1, "available_at_max": "2026-04-01T00:00:00Z"},
         },
     )
@@ -134,6 +151,10 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     assert "sentiment" in sample["signal_model"]["feature_contributions"]
     assert sample["snapshot_manifest"]["prediction_time"] == "2026-04-01T00:00:00Z"
     assert sample["snapshot_manifest"]["sources"]
+    assert sample["news_evidence"]["source"] == "historical_news"
+    assert sample["news_evidence"]["n_items"] == 1
+    assert sample["news_evidence"]["skipped_future"] == 1
+    assert sample["news_evidence"]["items"][0]["title"] == "Bitcoin bullish rally confirmed"
     store.close()
     repo.close()
 
