@@ -18,6 +18,7 @@ class IngestionStats:
     fetched_markets: int = 0
     inserted: int = 0
     duplicates: int = 0
+    updated_duplicates: int = 0
     skipped_no_outcome: int = 0
     skipped_no_price_history: int = 0
     skipped_pit: int = 0
@@ -80,7 +81,9 @@ class HistoricalCollectionsIngestor:
             stats.news_items_skipped_future += int(news.get("skipped_future") or 0)
             if self.store.collection_exists(collection["token_id"], collection["as_of"]):
                 stats.duplicates += 1
-                continue
+                stats.updated_duplicates += 1
+            else:
+                stats.inserted += 1
             self.store.record_market(market.to_market(), fetched_at=market.resolution_time.isoformat())
             self.store.record_collection(
                 collection["token_id"],
@@ -89,7 +92,6 @@ class HistoricalCollectionsIngestor:
                 collection["market_price"],
                 collection["raw"],
             )
-            stats.inserted += 1
         return stats
 
 

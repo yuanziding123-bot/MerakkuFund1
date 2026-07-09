@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
+from email.utils import parsedate_to_datetime
 
 from polyagents.dataflows.features import extract_features
 from polyagents.dataflows.sentiment import LexiconSentimentScorer, SentimentScorer, aggregate_sentiment
@@ -78,7 +79,12 @@ def _published_available_at(value: str | None) -> datetime | None:
     text = str(value).strip()
     parsed = parse_iso(text)
     if parsed is None:
-        return None
+        try:
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
     if "T" not in text and len(text) <= 10:
         parsed = datetime.combine(parsed.date(), time.max, tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)

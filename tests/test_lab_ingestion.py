@@ -227,6 +227,30 @@ def test_collection_generation_treats_date_only_news_as_end_of_day():
     assert collection["raw"]["features"]["factors"]["sentiment"] == 0.0
 
 
+def test_collection_generation_accepts_rfc_news_publish_dates():
+    market, _ = parse_settled_binary_market(_raw_market())
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/rfc",
+            snippet="bullish",
+            published="Thu, 01 Jan 2026 03:00:00 GMT",
+        ),
+    ])
+
+    collection, reason = build_historical_collection(
+        market,
+        _candles(10),
+        news_client=news,
+        min_history=4,
+    )
+
+    raw_news = collection["raw"]["news"]
+    assert reason is None
+    assert raw_news["n_items"] == 1
+    assert raw_news["items"][0]["available_at"] == "2026-01-01T03:00:00Z"
+
+
 def test_collection_generation_skips_when_history_is_too_short():
     market, _ = parse_settled_binary_market(_raw_market())
     collection, reason = build_historical_collection(market, _candles(4), min_history=4)
@@ -280,6 +304,32 @@ def test_ingestion_stats_include_historical_news_counts(tmp_path):
     assert stats.inserted == 1
     assert stats.news_items_used == 1
     assert stats.news_items_skipped_future == 1
+    store.close()
+
+
+def test_ingestion_refreshes_duplicate_collections_with_news(tmp_path):
+    store = DataStore(tmp_path / "data.db")
+    client = _FakeClient([_raw_market()], {"yes-token": _candles(10)})
+
+    first = HistoricalCollectionsIngestor(client=client, store=store).run(limit=10)
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin wins support",
+            url="https://example.com/old",
+            snippet="bullish rally",
+            published="2026-01-01T03:00:00Z",
+        ),
+    ])
+    second = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
+    [collection] = store.fetch_collections()
+
+    assert first.inserted == 1
+    assert second.duplicates == 1
+    assert second.updated_duplicates == 1
+    assert second.inserted == 0
+    assert collection["raw"]["news"]["n_items"] == 1
+    assert collection["raw"]["features"]["factors"]["sentiment"] > 0
+    assert store.counts()["collections"] == 1
     store.close()
 
 
