@@ -273,6 +273,38 @@ def scan_opportunities_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"opportunities"}), run, cost=6)
 
 
+def relational_alpha_capability(fn: Callable) -> Capability:
+    """Event-relatedness engine (pack: alpha-research). ``fn(query) -> dict`` builds the
+    target's mutually-exclusive winner set, checks field consistency (Σ prices vs 1),
+    computes redistribution + a lag signal (a rival crashed but the target hasn't repriced
+    → underpriced), and a what-if sensitivity (if rival X is eliminated → target fair prob).
+    Deterministic, computed from live prices + candle history."""
+    def run(ctx: Context) -> dict:
+        return {"relational_alpha": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("relational_alpha",
+                      "Cross-event / relational analysis of a target market: winner-set "
+                      "consistency, redistribution + lag detection (a related event moved but "
+                      "the target hasn't → edge), and what-if sensitivity to rivals. Use for "
+                      "'is <team> underpriced vs the field', 'how does <other event> affect <target>', "
+                      "'关联/事件关联性/别的场次对这场的影响'. Computed, no fabrication.",
+                      frozenset({"question"}), frozenset({"relational_alpha"}), run, cost=5)
+
+
+def research_alpha_capability(fn: Callable) -> Capability:
+    """Strategy alpha review (pack: alpha-research). ``fn(query) -> dict`` runs the relational
+    engine + news, then judges whether the user's thesis has alpha and proposes concrete
+    improvements — grounded strictly in the computed numbers. The Ask-side 'validate my
+    strategy + tell me how to improve it' deliverable."""
+    def run(ctx: Context) -> dict:
+        return {"alpha_review": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("research_alpha",
+                      "Validate a trading THESIS/STRATEGY the user proposes and suggest "
+                      "improvements: gather relational (cross-event) evidence + news, judge if "
+                      "it has alpha with the numbers, and give concrete, data-grounded fixes. Use "
+                      "for '验证我的策略有没有 alpha / 帮我改进策略 / research whether <thesis> has edge'.",
+                      frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
+
+
 def plot_market_capability(fn: Callable) -> Capability:
     """Visualize market data as a chart (core, always-on).
 

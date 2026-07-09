@@ -22,7 +22,8 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
-                           plot_market_capability,
+                           plot_market_capability, relational_alpha_capability,
+                           research_alpha_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            scan_opportunities_capability, strategy_capability)
@@ -295,6 +296,114 @@ def default_registry() -> list:
             return {"query": query, "n": 0, "opportunities": [],
                     "error": f"{type(exc).__name__}: {exc}"}
         return {"query": query, **out}
+
+    # ----- pack: alpha-research (event-relatedness engine + strategy review) -----
+
+    def _recent_change(token_id, bars=24):
+        """Recent price move for a token (last close vs ~`bars` bars ago)."""
+        c = eng.client.fetch_price_history(token_id, interval="max") or []
+        if len(c) < 2:
+            return 0.0
+        ref = c[-min(bars, len(c))].close
+        return round(float(c[-1].close) - float(ref), 4)
+
+    def _winner_set(query, scan_limit=90):
+        """Resolve the target and find its mutually-exclusive winner set — the YES side
+        of every 'Will <X> win the <same event>?' market (e.g. all WC champions)."""
+        tgt = resolve(query)
+        if tgt.get("error"):
+            return None, tgt
+        tq = str(tgt.get("question", "")).lower()
+        if " win " not in tq:                               # not a 'win the X' target
+            return {"target": tgt, "event": None, "siblings": []}, None
+        event_key = tq.split(" win ", 1)[1].strip(" ?.")    # e.g. "the 2026 fifa world cup"
+        rows = mcp_server.scan_markets(limit=scan_limit, min_volume_24h=0.0)
+        sibs, seen = [], set()
+        for r in rows:
+            q = str(r.get("question", "")).lower()
+            if r.get("outcome") != "YES" or " win " not in q or event_key not in q:
+                continue
+            if r.get("question") in seen:
+                continue
+            seen.add(r.get("question"))
+            sibs.append({"question": r.get("question"), "token_id": r.get("token_id"),
+                         "price": float(r.get("price") or 0.0)})
+        return {"target": tgt, "event": event_key, "siblings": sibs}, None
+
+    def relational_alpha(query, top_k=8):
+        """Event-relatedness engine: winner-set consistency + redistribution + lag
+        detection + what-if. Deterministic, computed from live prices + candle history."""
+        ws, err = _winner_set(query)
+        if err:
+            return {"query": query, "error": err["error"]}
+        tgt, sibs, event = ws["target"], ws["siblings"], ws["event"]
+        tgt_sib = next((s for s in sibs if s["question"] == tgt.get("question")), None)
+        if event is None or tgt_sib is None or len(sibs) < 3:
+            return {"query": query, "target": tgt, "event": event, "siblings_n": len(sibs),
+                    "note": "未找到清晰的互斥冠军集(目标非 'win the X' 型,或同组市场太少),关联推理不适用。"}
+        tgt_price = tgt_sib["price"]
+        field_sum = sum(s["price"] for s in sibs)
+        rest = field_sum - tgt_price
+        w = (tgt_price / rest) if rest > 0 else 0.0         # target's share of "the rest of the field"
+
+        rivals = sorted((s for s in sibs if s["token_id"] != tgt_sib["token_id"]),
+                        key=lambda s: -s["price"])[:top_k]
+        tgt_delta = _recent_change(tgt_sib["token_id"])
+        rival_moves, released = [], 0.0
+        for r in rivals:
+            d = _recent_change(r["token_id"])
+            rival_moves.append({**r, "delta": d})
+            if d < 0:
+                released += -d                              # probability "released" by a rival crashing
+        implied_rise = round(w * released, 4)              # what the target SHOULD have gained
+        lag_gap = round(implied_rise - max(0.0, tgt_delta), 4)   # …minus what it actually gained
+        signal = "buy" if lag_gap > 0.01 else ("watch" if lag_gap > 0.003 else "none")
+
+        whatif = []
+        for r in rivals[:5]:
+            newrest = field_sum - r["price"]
+            tgt_new = tgt_price + r["price"] * (tgt_price / newrest) if newrest > 0 else tgt_price
+            whatif.append({"question": r["question"], "rival_price": round(r["price"], 4),
+                           "target_fair_if_out": round(tgt_new, 4),
+                           "delta": round(tgt_new - tgt_price, 4)})
+        return {"query": query, "target": {**tgt, "price": round(tgt_price, 4),
+                                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
+                "event": event, "n_field": len(sibs), "field_sum": round(field_sum, 3),
+                "consistency": ("overround(市场加价)" if field_sum > 1.03
+                                else "underround(反常低估)" if field_sum < 0.97 else "tight(接近无套利)"),
+                "target_recent_delta": tgt_delta, "field_released": round(released, 4),
+                "implied_target_rise": implied_rise, "lag_gap": lag_gap, "signal": signal,
+                "top_rivals": rival_moves[:6], "what_if": whatif}
+
+    def research_alpha(query):
+        """Strategy review: run the relational engine + news, then have the LLM judge
+        whether the user's thesis has alpha and propose concrete improvements — grounded
+        strictly in the computed numbers (no fabricated data)."""
+        import json as _json
+        rel = relational_alpha(query)
+        news = news_sentiment(query)
+        news_sig = news.get("signal") if isinstance(news, dict) else None
+        evidence = _json.dumps({"relational": rel, "news_signal": news_sig,
+                                "news_mean": news.get("mean_sentiment") if isinstance(news, dict) else None},
+                               ensure_ascii=False, default=str)[:2600]
+        review = None
+        try:
+            sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
+                   "thesis/strategy. Using ONLY the computed evidence provided (a winner-set "
+                   "relational analysis + a news-sentiment signal), judge whether the thesis has "
+                   "alpha and propose 2-3 CONCRETE improvements. Cite the actual numbers "
+                   "(lag_gap, field_sum, what-if deltas). Never invent data; if evidence is thin, "
+                   "say so and say what data would settle it. Answer in the user's language, <170 words, "
+                   "as: 1) 复述策略 2) alpha 判定(据数) 3) 改进建议.")
+            user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
+            resp = eng._get_llm().invoke([("system", sys), ("user", user)])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            review = str(text).strip()
+        except Exception as exc:
+            review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
+        return {"query": query, "relational": rel, "news_signal": news_sig, "review": review}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
@@ -819,6 +928,8 @@ def default_registry() -> list:
         hunt_alpha_capability(hunt_alpha),
         scan_opportunities_capability(scan_opportunities),
         plot_market_capability(plot_market),
+        relational_alpha_capability(relational_alpha),
+        research_alpha_capability(research_alpha),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),

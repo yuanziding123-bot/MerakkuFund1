@@ -935,6 +935,56 @@ def _format_chart(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_relational(a: dict, path: str) -> str:
+    """Render the event-relatedness engine: winner-set consistency + lag + what-if."""
+    if a.get("error"):
+        return f"**关联推理 · relational_alpha** · {path}\n\n失败:{a['error']}"
+    tgt = a.get("target") or {}
+    lines = [f"**关联推理引擎 · relational_alpha** · {path}", ""]
+    if a.get("note"):
+        lines.append(f"**标的**:{tgt.get('question')}\n\n{a['note']}")
+        return "\n".join(lines)
+    lines.append(f"**标的**:{tgt.get('question')}  \n市场价 {tgt.get('price')} · 冠军集内应有份额 {tgt.get('fair_share')}")
+    lines.append(f"\n**① 冠军集一致性**:{a.get('n_field')} 个互斥标的,Σ价格 = **{a.get('field_sum')}** · {a.get('consistency')}")
+    sig = a.get("signal")
+    tag = "🟢 买入" if sig == "buy" else ("🟡 观察" if sig == "watch" else "⚪ 无")
+    lines.append(f"\n**② 再分配 + 滞后检测**(别的场次一动、这场跟没跟上)")
+    lines.append(f"　对手近期共释放概率 {a.get('field_released')} → 目标**应涨** {a.get('implied_target_rise')};"
+                 f"实际涨 {a.get('target_recent_delta')} → **lag_gap = {a.get('lag_gap')}** · 信号 **{tag}**")
+    rivals = a.get("top_rivals") or []
+    if rivals:
+        lines.append("\n| 主要对手 | 价格 | 近期Δ |")
+        lines.append("|---|---|---|")
+        for r in rivals:
+            lines.append(f"| {(r.get('question') or '')[:34]} | {round(r.get('price',0),4)} | {r.get('delta'):+} |")
+    wi = a.get("what_if") or []
+    if wi:
+        lines.append("\n**③ What-if(某对手出局 → 目标应有概率)**")
+        lines.append("\n| 若此对手出局 | 目标公允 | Δ |")
+        lines.append("|---|---|---|")
+        for w in wi:
+            lines.append(f"| {(w.get('question') or '')[:34]} | {w.get('target_fair_if_out')} | {w.get('delta'):+} |")
+    lines.append("\n_lag_gap>0 = 场上事件已动、目标价还没跟上(潜在买点);Σ≈1 为无套利基准,偏离即结构性错价。"
+                 "均为**关联隐含信号**,想验证某策略 → research_alpha。_")
+    return "\n".join(lines)
+
+
+def _format_alpha_review(a: dict, path: str) -> str:
+    """Render the strategy review: LLM verdict + improvements over the computed evidence."""
+    if a.get("error"):
+        return f"**策略评审 · research_alpha** · {path}\n\n失败:{a['error']}"
+    lines = [f"**策略评审 · research_alpha** · {path}", ""]
+    if a.get("review"):
+        lines.append(a["review"])
+    if a.get("news_signal"):
+        lines.append(f"\n_新闻情绪信号:{a['news_signal']}_")
+    rel = a.get("relational") or {}
+    if rel and not rel.get("error"):
+        lines.append("\n---\n\n**关联证据(计算所得,评审依据):**")
+        lines.append(_format_relational(rel, path).split("\n", 2)[-1])   # drop the header line
+    return "\n".join(lines)
+
+
 def _format_backfill(a: dict, path: str) -> str:
     """Render the outcome-backfill: how many stored snapshots got labelled."""
     if a.get("error"):
@@ -1182,6 +1232,10 @@ def _kernel_summary(ctx) -> str:
     # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
     if "microstructure" in f:                            # order-flow scan (focused)
         return _format_microstructure(f["microstructure"], path)
+    if "alpha_review" in f:                              # strategy validation + improvement
+        return _format_alpha_review(f["alpha_review"], path)
+    if "relational_alpha" in f:                          # event-relatedness engine
+        return _format_relational(f["relational_alpha"], path)
     if "chart" in f:                                     # explicit visualization request
         return _format_chart(f["chart"], path)
     if "news_sentiment" in f:                            # news + sentiment signal
