@@ -1643,7 +1643,7 @@ async function runLabIngestion(){
     const limit=+(document.getElementById('labIngestLimit').value||100);
     const r=await labFetchJson('/api/lab/data/ingest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
     const s=r.stats||{};
-    out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}</pre>`;
+    out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nupdated_duplicates: ${s.updated_duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}\nnews_items_used: ${s.news_items_used??0}\nnews_items_skipped_no_published: ${s.news_items_skipped_no_published??0}\nnews_items_skipped_future: ${s.news_items_skipped_future??0}</pre>`;
     await loadLabDataStatus();
   }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
   finally{ btn.disabled=false; btn.textContent='▶ Run ingestion'; }
@@ -1748,8 +1748,20 @@ function renderLabReport(rep){
     : '';
   const warnings=(rep.pit_warnings||[]).slice(0,3).map(w=>
     `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
-  const sample=(rep.market_sample||[]).slice(0,5).map(x=>
-    `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}`).join('\n');
+  const sample=(rep.market_sample||[]).slice(0,5).map(x=>{
+    const ne=x.news_evidence||{};
+    const first=(ne.items&&ne.items[0])||null;
+    let newsLine = '';
+    if(ne.source){
+      const source = ne.source === 'unavailable' || ne.source === 'unknown'
+        ? 'unavailable'
+        : ne.source;
+      newsLine = `\n  news: ${ne.n_items||0} used · ${source} · sentiment=${Number(ne.mean_sentiment||0).toFixed(3)} ${ne.label||'neutral'} · skipped_future=${ne.skipped_future||0} · skipped_undated=${ne.skipped_no_published||0}${first?`\n  headline: ${(first.title||'').slice(0,110)}`:''}`;
+    }else{
+      newsLine = '\n  news: not recorded in this report · rerun ingestion/backtest to populate PIT news evidence';
+    }
+    return `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}${newsLine}`;
+  }).join('\n');
   const target=document.getElementById('labReportReview') || document.getElementById('btResult');
   target.innerHTML=
     `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · strategy=${esc(cfg.strategy_id||cfg.signal_model_id||'—')} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+

@@ -7,6 +7,7 @@ collector degrades to a "no news available" report rather than failing the run.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass
@@ -32,13 +33,8 @@ class NewsClient:
     def enabled(self) -> bool:
         return self._tavily is not None
 
-    def search(self, query: str, max_results: int = 5) -> list[NewsItem]:
-        if not self._tavily:
-            return []
-        try:
-            resp = self._tavily.search(query=query, max_results=max_results, search_depth="basic")
-        except Exception:
-            return []
+    @staticmethod
+    def _items_from_response(resp: dict) -> list[NewsItem]:
         out: list[NewsItem] = []
         for r in resp.get("results", []):
             out.append(
@@ -50,3 +46,41 @@ class NewsClient:
                 )
             )
         return out
+
+    def search(self, query: str, max_results: int = 5) -> list[NewsItem]:
+        if not self._tavily:
+            return []
+        try:
+            resp = self._tavily.search(query=query, max_results=max_results, search_depth="basic")
+        except Exception:
+            return []
+        return self._items_from_response(resp)
+
+    def search_between(
+        self,
+        query: str,
+        *,
+        start: datetime,
+        end: datetime,
+        max_results: int = 5,
+    ) -> list[NewsItem]:
+        """Search news in a date window.
+
+        Tavily accepts date strings, but callers still need to validate each
+        returned item against point-in-time constraints because search APIs can
+        return undated or loosely dated results.
+        """
+        if not self._tavily:
+            return []
+        try:
+            resp = self._tavily.search(
+                query=query,
+                max_results=max_results,
+                search_depth="basic",
+                topic="news",
+                start_date=start.date().isoformat(),
+                end_date=end.date().isoformat(),
+            )
+        except Exception:
+            return []
+        return self._items_from_response(resp)

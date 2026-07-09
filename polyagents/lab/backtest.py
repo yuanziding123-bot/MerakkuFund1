@@ -321,6 +321,7 @@ class BacktestRunner:
                     question=question,
                     source="collections",
                     signal_model=model_output,
+                    news_evidence=self._news_evidence(raw),
                     snapshot_manifest=self._snapshot_manifest(
                         token=token,
                         row=row,
@@ -401,6 +402,7 @@ class BacktestRunner:
         question: str | None,
         source: str,
         signal_model: dict | None = None,
+        news_evidence: dict | None = None,
         snapshot_manifest: dict | None = None,
     ) -> dict:
         outcome = float(forecast.outcome) if forecast.outcome is not None else None
@@ -422,7 +424,36 @@ class BacktestRunner:
             "absolute_error_model": abs(forecast.p_cal - outcome) if outcome is not None else None,
             "absolute_error_market": abs(forecast.p_market - outcome) if outcome is not None else None,
             "signal_model": signal_model,
+            "news_evidence": news_evidence,
             "snapshot_manifest": snapshot_manifest,
+        }
+
+    @staticmethod
+    def _news_evidence(raw: dict) -> dict | None:
+        news = raw.get("news") if isinstance(raw, dict) else None
+        if not isinstance(news, dict):
+            return None
+        sentiment = news.get("sentiment") if isinstance(news.get("sentiment"), dict) else {}
+        items = news.get("items") if isinstance(news.get("items"), list) else []
+        return {
+            "source": news.get("source") or "unknown",
+            "n_items": int(news.get("n_items") or len(items) or 0),
+            "mean_sentiment": float(sentiment.get("mean", 0.0) or 0.0),
+            "label": sentiment.get("label") or "neutral",
+            "available_at": news.get("available_at"),
+            "skipped_no_published": int(news.get("skipped_no_published") or 0),
+            "skipped_future": int(news.get("skipped_future") or 0),
+            "items": [
+                {
+                    "title": str(i.get("title") or ""),
+                    "url": str(i.get("url") or ""),
+                    "published": i.get("published"),
+                    "available_at": i.get("available_at"),
+                    "sentiment": i.get("sentiment"),
+                }
+                for i in items[:3]
+                if isinstance(i, dict)
+            ],
         }
 
     @staticmethod
