@@ -544,20 +544,28 @@ def default_registry() -> list:
     #   resolve_market -> analyze_market
     #   explore -> reason -> analyze -> backtest (historical comparison) -> conclude
 
+    def _best_match(rows, words):
+        """The scanned row whose English question shares the most query words."""
+        best, best_hits = None, 0
+        for row in rows:
+            q = str(row.get("question", "")).lower()
+            hits = sum(1 for w in words if w in q)
+            if hits > best_hits:
+                best, best_hits = row, hits
+        return best, best_hits
+
     def resolve(query):
         """Pick ONE concrete market for the request: explicit token id, else best
         keyword match among live markets, else the most active."""
         q = (query or "").strip()
         m = mcp_server._get_market(q) if q else None      # exact token id?
         if m is None:
-            rows = mcp_server.scan_markets(limit=25, min_volume_24h=0.0)
-            words = {w for w in q.lower().split() if len(w) > 2}
-            best, best_hits = None, 0
-            for row in rows:
-                hits = sum(1 for w in words if w in str(row.get("question", "")).lower())
-                if hits > best_hits:
-                    best, best_hits = row, hits
-            if best is not None:
+            rows = mcp_server.scan_markets(limit=40, min_volume_24h=0.0)
+            best, best_hits = _best_match(rows, {w for w in q.lower().split() if len(w) > 2})
+            if best_hits == 0:                            # no English overlap (e.g. a Chinese name):
+                terms = {w for t in _topic_terms(q) for w in _words(t)}   # LLM-translate, then retry
+                best, best_hits = _best_match(rows, terms)
+            if best is not None and best_hits > 0:
                 return {"token_id": best["token_id"], "question": best["question"],
                         "price": best["price"], "matched_by": f"keywords({best_hits})"}
             m = eng.most_active_market()                   # nothing matched
