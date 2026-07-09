@@ -13,6 +13,10 @@ env/
 # Secrets / local config
 .env
 
+# Claude Code local settings (auto-grows a permission allowlist; may contain keys)
+.claude/settings.json
+.claude/settings.local.json
+
 # Local runtime / deployment scratch
 .local/
 .polyagents/
