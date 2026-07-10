@@ -863,7 +863,7 @@ def default_registry() -> list:
         q = (query or "").strip()
         m = mcp_server._get_market(q) if q else None      # exact token id?
         if m is None:
-            rows = mcp_server.scan_markets(limit=40, min_volume_24h=0.0)
+            rows = mcp_server.scan_markets(limit=120, min_volume_24h=0.0)   # wide net (WC dominates top)
             best, best_hits = _best_match(rows, {w for w in q.lower().split() if len(w) > 2})
             if best_hits == 0:                            # no English overlap (e.g. a Chinese name):
                 terms = {w for t in _topic_terms(q) for w in _words(t)}   # LLM-translate, then retry
@@ -872,6 +872,11 @@ def default_registry() -> list:
                 return {"token_id": best["token_id"], "question": best["question"],
                         "price": best["price"], "matched_by": f"keywords({best_hits})"}
             m = eng.most_active_market()                   # nothing matched
+            generic = (not q) or any(w in q.lower() for w in
+                                     ("最活跃", "活跃", "most active", "liquid", "一个市场", "any market"))
+            if m is not None and not generic:              # a specific target we couldn't find — be honest
+                return {"token_id": m.token_id, "question": m.question, "price": m.price,
+                        "matched_by": f"fallback", "unmatched": q[:40]}
         if m is None:
             return {"error": "no market found", "query": query}
         return {"token_id": m.token_id, "question": m.question, "price": m.price,

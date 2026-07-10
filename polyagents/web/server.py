@@ -977,6 +977,9 @@ def _format_relational(a: dict, path: str) -> str:
     lines = [f"**关联推理引擎 · relational_alpha** · {path}", ""]
     if mode:
         lines.append(f"_策略类型:**{mode}**_")
+    if tgt.get("matched_by") == "fallback":
+        lines.append(f"\n⚠️ 没匹配到你说的「{tgt.get('unmatched') or a.get('query')}」,退回展示最活跃市场——"
+                     f"结果**未必是你要的标的**,请换更贴近市场原名的说法。")
     if a.get("note"):
         lines.append(f"\n**标的**:{tgt.get('question')}\n\n{a['note']}")
         lines += _format_implication(a.get("implication"))
