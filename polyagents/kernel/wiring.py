@@ -336,16 +336,19 @@ def default_registry() -> list:
         calling the eventual winner? Returns per-member (market, model, outcome) records."""
         from polyagents.lab.backtest import BacktestRunner
         runner = BacktestRunner(client=eng.client, store=getattr(eng, "store", None))
-        raw = eng.client.list_resolved_markets(limit=200)
+        raw = eng.client.list_resolved_markets(limit=500)
         yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
         groups: dict = {}
         for m in yes:
             q = (m.question or "").lower()
-            if " win " in q:
-                groups.setdefault(q.split(" win ", 1)[1].strip(" ?."), []).append(m)
+            key = q.split(" win ", 1)[1].strip(" ?.") if " win " in q else None
+            # only a real competition suffix — reject date/scoreline groupings ("on 2026-..","2-0")
+            if key and not key.startswith("on ") and not re.match(r"^[\d\- ]+$", key):
+                groups.setdefault(key, []).append(m)
         records, n_events = [], 0
         for members in groups.values():
-            if len(members) < 3:
+            # a genuine mutually-exclusive winner-set has EXACTLY ONE resolved winner
+            if len(members) < 4 or sum(1 for m in members if m.price >= 0.5) != 1:
                 continue
             pit = {}                                        # token -> (PIT price, resolved outcome)
             for m in members:
@@ -393,10 +396,16 @@ def default_registry() -> list:
                             "beats_market": (_brier_delta(recs) or 0) > 0})
         ranked = sorted([r for r in results if r["brier_delta"] is not None],
                         key=lambda r: r["brier_delta"], reverse=True)
+        if n_events == 0:
+            note = ("目前**没有已结算的互斥冠军集**可回测(真冠军集需恰好一个赢家;Polymarket 历史里极少,"
+                    "唯一活跃的 2026 世界杯尚未结算)。历史回放这条路暂时喂不饱——正确做法是**前向追踪**:"
+                    "把每次算出的 fair_prob 落库,等市场结算后打分(Tier2 预测追踪)。")
+        elif n_events < 5:
+            note = f"样本偏少(仅 {n_events} 个已结算冠军集),结论仅供参考;随赛事结算/预测追踪累积会变准。"
+        else:
+            note = "样本充足。"
         return {"query": query, "n_events": n_events, "n_records": n_records,
-                "variants": results, "best": ranked[0] if ranked else None,
-                "note": ("样本充足" if n_events >= 5 else
-                         f"样本不足(仅 {n_events} 个已结算冠军集),结论仅供参考——随赛事结算/云端 DB 累积会变准。")}
+                "variants": results, "best": ranked[0] if ranked else None, "note": note}
 
     def relational_alpha(query, top_k=8):
         """Event-relatedness engine: winner-set consistency + redistribution + lag
