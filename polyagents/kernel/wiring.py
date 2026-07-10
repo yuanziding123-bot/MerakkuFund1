@@ -330,6 +330,72 @@ def default_registry() -> list:
                          "price": float(r.get("price") or 0.0)})
         return {"target": tgt, "event": event_key, "siblings": sibs}, None
 
+    # stage keywords → level; a STRONGER claim (higher level) logically implies the weaker
+    # ones, so its probability must be ≤ theirs (win ⊆ reach final ⊆ reach semi ⊆ advance).
+    _STAGE_KW = [
+        (("win the", "wins the", "champion", "to win", "winner of"), 4),
+        (("reach the final", "make the final", "in the final", "the final"), 3),
+        (("semifinal", "semi-final", "semi final"), 2),
+        (("quarterfinal", "quarter-final", "quarter final"), 1),
+        (("advance", "group stage", "qualify", "round of", "knockout"), 0),
+    ]
+
+    def _stage_level(q):
+        ql = str(q).lower()
+        for kws, lvl in _STAGE_KW:
+            if any(k in ql for k in kws):
+                return lvl
+        return None
+
+    def _classify_strategy(query):
+        """Route the user's intent to a strategy mode → which relations/signals matter."""
+        q = (query or "").lower()
+        if any(w in q for w in ("套利", "arbitrage", "arb", "无风险", "risk-free", "risk free",
+                                "mispric", "inconsist", "平价", "两腿", "multi-leg")):
+            return "arb"
+        if any(w in q for w in ("短线", "日内", "short-term", "short term", "intraday", "快进",
+                                "scalp", "momentum", "快速", "波段")):
+            return "short"
+        if any(w in q for w in ("hold", "持有", "长期", "long-term", "long term", "到期", "持仓")):
+            return "hold"
+        return "general"
+
+    def _entity_implication(target_question):
+        """Same-entity cluster + logical-implication check: find the target entity's other
+        markets, order them by stage, and flag where a STRONGER claim is priced above a
+        weaker one (P(win) > P(reach final) is a risk-free inconsistency)."""
+        m = re.match(r"will\s+(.+?)\s+(win|reach|advance|make|beat|qualify|to win)",
+                     str(target_question or "").lower())
+        ent = m.group(1).strip() if m else None
+        if not ent or len(ent) < 2:
+            return {"entity": None, "cluster": [], "chain": [], "violations": [], "path": None}
+        rows = mcp_server.scan_markets(limit=100, min_volume_24h=0.0)
+        cluster, seen = [], set()
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", ""))
+            if ent in q.lower() and q not in seen:
+                seen.add(q)
+                cluster.append({"question": q, "price": round(float(r.get("price") or 0), 4),
+                                "level": _stage_level(q)})
+        staged = sorted([c for c in cluster if c["level"] is not None], key=lambda c: -c["level"])
+        violations = []
+        for i in range(len(staged) - 1):
+            hi, lo = staged[i], staged[i + 1]
+            if hi["level"] > lo["level"] and hi["price"] > lo["price"] + 0.01:
+                violations.append({"stronger": hi["question"], "p_strong": hi["price"],
+                                   "weaker": lo["question"], "p_weak": lo["price"],
+                                   "gap": round(hi["price"] - lo["price"], 4)})
+        path = None                                         # path decomposition: win vs reach-final
+        win_m = next((c for c in staged if c["level"] == 4), None)
+        fin_m = next((c for c in staged if c["level"] == 3), None)
+        if win_m and fin_m and fin_m["price"] > 0:
+            path = {"reach_final": fin_m["price"], "win": win_m["price"],
+                    "implied_p_win_given_final": round(win_m["price"] / fin_m["price"], 4)}
+        return {"entity": ent, "cluster": cluster, "chain": staged,
+                "violations": violations, "path": path}
+
     def _winner_set_backtest(predict_frac=0.5, normalize=True, max_events=15):
         """Replay the relational estimate over RESOLVED winner-sets: at a point in time,
         does the field-implied (vig-free) fair probability beat the raw market price at
@@ -408,16 +474,24 @@ def default_registry() -> list:
                 "variants": results, "best": ranked[0] if ranked else None, "note": note}
 
     def relational_alpha(query, top_k=8):
-        """Event-relatedness engine: winner-set consistency + redistribution + lag
-        detection + what-if. Deterministic, computed from live prices + candle history."""
+        """Event-relatedness engine across relation types + strategy mode: winner-set
+        consistency + redistribution + lag + what-if, PLUS same-entity cluster and
+        logical-implication (A⊆B) arbitrage. Deterministic, from live prices + candles."""
+        strategy_mode = _classify_strategy(query)
         ws, err = _winner_set(query)
         if err:
-            return {"query": query, "error": err["error"]}
+            return {"query": query, "strategy_mode": strategy_mode, "error": err["error"]}
         tgt, sibs, event = ws["target"], ws["siblings"], ws["event"]
+        impl = _entity_implication(tgt.get("question"))     # same-entity cluster + implication
+        implication = {"entity": impl["entity"], "chain": impl["chain"],
+                       "violations": impl["violations"], "path": impl["path"]}
         tgt_sib = next((s for s in sibs if s["question"] == tgt.get("question")), None)
         if event is None or tgt_sib is None or len(sibs) < 3:
-            return {"query": query, "target": tgt, "event": event, "siblings_n": len(sibs),
-                    "note": "未找到清晰的互斥冠军集(目标非 'win the X' 型,或同组市场太少),关联推理不适用。"}
+            return {"query": query, "strategy_mode": strategy_mode, "target": tgt, "event": event,
+                    "siblings_n": len(sibs), "implication": implication,
+                    "note": ("未找到清晰的互斥冠军集(目标非 'win the X' 型),但已按同实体簇/逻辑蕴含分析。"
+                             if impl["chain"] else
+                             "未找到清晰的互斥冠军集,也没有可用的同实体关联市场,关联推理不适用。")}
         tgt_price = tgt_sib["price"]
         field_sum = sum(s["price"] for s in sibs)
         rest = field_sum - tgt_price
@@ -449,8 +523,9 @@ def default_registry() -> list:
             whatif.append({"question": r["question"], "rival_price": round(r["price"], 4),
                            "target_fair_if_out": round(tgt_new, 4),
                            "delta": round(tgt_new - tgt_price, 4)})
-        return {"query": query, "target": {**tgt, "price": round(tgt_price, 4),
-                                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
+        return {"query": query, "strategy_mode": strategy_mode, "implication": implication,
+                "target": {**tgt, "price": round(tgt_price, 4),
+                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
                 "event": event, "n_field": len(sibs), "field_sum": round(field_sum, 3),
                 "consistency": ("overround(市场加价)" if field_sum > 1.03
                                 else "underround(反常低估)" if field_sum < 0.97 else "tight(接近无套利)"),
@@ -492,16 +567,27 @@ def default_registry() -> list:
                                ensure_ascii=False, default=str)[:2900]
         review = None
         try:
+            mode = (rel.get("strategy_mode") if isinstance(rel, dict) else None) or "general"
+            mode_hint = {
+                "hold": "This is a HOLD/long-term thesis: emphasize structural fair value (winner-set "
+                        "consistency + logical-implication bounds) and whether the mispricing should "
+                        "converge by resolution.",
+                "short": "This is a SHORT-TERM thesis: emphasize the lag signal, recent related-market "
+                         "moves, and news — repricing speed matters more than structural value.",
+                "arb": "This is an ARBITRAGE thesis: emphasize logical-implication violations "
+                       "(P(stronger)>P(weaker)), winner-set Σ≠1, and any risk-free multi-leg. If no "
+                       "inconsistency is found, say so plainly.",
+                "general": "Weigh structural value, lag, and any inconsistency together.",
+            }[mode]
             sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
-                   "thesis/strategy. Using ONLY the computed evidence provided (a synthesized fair "
-                   "probability, a HISTORICAL backtest of the relational estimate with variant "
-                   "self-test, a winner-set relational analysis, a news signal), judge whether the "
-                   "thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the verdict on BOTH "
-                   "synthesized_fair_prob vs market AND the historical_backtest (does the relational "
-                   "estimate beat the market — brier_delta, best variant, n_events). For improvements, "
-                   "prefer the best-performing variant from the self-test. Cite the actual numbers. "
-                   "Never invent data; if n_events is small, say the backtest is thin. Answer in the "
-                   "user's language, <190 words, as: 1) 复述策略 2) alpha 判定(据合成概率+历史回测) 3) 改进建议(据变体自测).")
+                   f"thesis/strategy. Strategy mode = {mode}. {mode_hint} Using ONLY the computed "
+                   "evidence (synthesized fair prob, historical backtest w/ variant self-test, "
+                   "winner-set analysis, same-entity implication chain + violations, news), judge "
+                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements tailored to the "
+                   "strategy mode. Anchor on synthesized_fair_prob vs market AND the backtest; for arb, "
+                   "cite implication violations. Prefer the best self-test variant for improvements. "
+                   "Cite real numbers; never invent data; if evidence is thin, say so. Answer in the "
+                   "user's language, <190 words, as: 1) 复述策略(含策略类型) 2) alpha 判定(据数) 3) 改进建议.")
             user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
             resp = eng._get_llm().invoke([("system", sys), ("user", user)])
             text = getattr(resp, "content", resp)

@@ -935,16 +935,53 @@ def _format_chart(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+_STRAT_LABEL = {"hold": "长期持有", "short": "短线交易", "arb": "套利", "general": "通用"}
+
+
+def _format_implication(impl: dict) -> list[str]:
+    """Same-entity cluster + logical-implication (A⊆B) arbitrage section."""
+    if not impl or not impl.get("entity"):
+        return []
+    out = [f"\n**逻辑蕴含 / 同实体(套利检查)** · 实体:**{impl.get('entity')}**"]
+    chain = impl.get("chain") or []
+    if len(chain) >= 2:
+        out.append("\n| 阶段(强→弱) | 概率 | 应满足 |")
+        out.append("|---|---|---|")
+        for c in chain:
+            out.append(f"| L{c.get('level')} {(c.get('question') or '')[:36]} | {c.get('price')} | P(强)≤P(弱) |")
+    vio = impl.get("violations") or []
+    if vio:
+        out.append("\n🟢 **发现逻辑套利(强于的反而更贵)**:")
+        for v in vio:
+            out.append(f"- **{(v.get('stronger') or '')[:30]}**({v.get('p_strong')}) > "
+                       f"{(v.get('weaker') or '')[:30]}({v.get('p_weak')}) · gap **{v.get('gap'):+}** "
+                       f"→ 卖强腿/买弱腿")
+    elif len(chain) >= 2:
+        out.append("\n　蕴含边界一致(无逻辑套利)。")
+    else:
+        out.append("　(当前只有一个阶段市场,无蕴含链/路径可查——有'进决赛/进半决赛'类市场时才会亮。)")
+    p = impl.get("path")
+    if p:
+        out.append(f"\n　路径分解:P(进决赛)={p.get('reach_final')} · P(夺冠)={p.get('win')} → "
+                   f"隐含 **P(夺冠|进决赛)={p.get('implied_p_win_given_final')}**")
+    return out
+
+
 def _format_relational(a: dict, path: str) -> str:
-    """Render the event-relatedness engine: winner-set consistency + lag + what-if."""
+    """Render the event-relatedness engine: strategy mode + winner-set + lag + what-if
+    + same-entity logical-implication arbitrage."""
     if a.get("error"):
         return f"**关联推理 · relational_alpha** · {path}\n\n失败:{a['error']}"
     tgt = a.get("target") or {}
+    mode = _STRAT_LABEL.get(a.get("strategy_mode"), a.get("strategy_mode") or "")
     lines = [f"**关联推理引擎 · relational_alpha** · {path}", ""]
+    if mode:
+        lines.append(f"_策略类型:**{mode}**_")
     if a.get("note"):
-        lines.append(f"**标的**:{tgt.get('question')}\n\n{a['note']}")
+        lines.append(f"\n**标的**:{tgt.get('question')}\n\n{a['note']}")
+        lines += _format_implication(a.get("implication"))
         return "\n".join(lines)
-    lines.append(f"**标的**:{tgt.get('question')}  \n市场价 {tgt.get('price')} · 冠军集内应有份额 {tgt.get('fair_share')}")
+    lines.append(f"\n**标的**:{tgt.get('question')}  \n市场价 {tgt.get('price')} · 冠军集内应有份额 {tgt.get('fair_share')}")
     if a.get("fair_prob") is not None:
         src = a.get("prob_sources") or {}
         edge = a.get("edge_vs_market")
@@ -972,8 +1009,9 @@ def _format_relational(a: dict, path: str) -> str:
         lines.append("|---|---|---|")
         for w in wi:
             lines.append(f"| {(w.get('question') or '')[:34]} | {w.get('target_fair_if_out')} | {w.get('delta'):+} |")
-    lines.append("\n_lag_gap>0 = 场上事件已动、目标价还没跟上(潜在买点);Σ≈1 为无套利基准,偏离即结构性错价。"
-                 "均为**关联隐含信号**,想验证某策略 → research_alpha。_")
+    lines += _format_implication(a.get("implication"))      # ④ same-entity logical-implication arb
+    lines.append("\n_lag_gap>0 = 场上事件已动、目标价还没跟上(潜在买点);Σ≈1 为无套利基准,偏离即结构性错价;"
+                 "逻辑套利=强于的事件反而更贵。均为**关联信号**,想验证某策略 → research_alpha。_")
     return "\n".join(lines)
 
 

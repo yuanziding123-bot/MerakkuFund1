@@ -44,6 +44,27 @@ def test_relational_alpha_surfaces_lag_and_whatif():
     assert board["what_if"][0]["delta"] == 0.09
 
 
+def test_implication_renders_logical_arbitrage():
+    from polyagents.web import server
+    impl = {"entity": "france",
+            "chain": [{"level": 4, "question": "Will France win the WC?", "price": 0.40},
+                      {"level": 3, "question": "Will France reach the final?", "price": 0.35}],
+            "violations": [{"stronger": "Will France win the WC?", "p_strong": 0.40,
+                            "weaker": "Will France reach the final?", "p_weak": 0.35, "gap": 0.05}],
+            "path": {"reach_final": 0.35, "win": 0.40, "implied_p_win_given_final": 1.1429}}
+    md = "\n".join(server._format_implication(impl))
+    assert "france" in md and "逻辑套利" in md and "卖强腿/买弱腿" in md
+    assert "P(夺冠|进决赛)=1.1429" in md            # path decomposition surfaced
+
+
+def test_strategy_label_shows_in_relational_render():
+    from polyagents.web import server
+    a = {"strategy_mode": "arb", "note": "no winner set", "target": {"question": "Q"},
+         "implication": {"entity": None}}
+    md = server._format_relational(a, "p")
+    assert "套利" in md                              # strategy mode surfaced
+
+
 def test_research_alpha_returns_review_over_evidence():
     def fn(query):
         return {"query": query, "news_signal": "bullish",
