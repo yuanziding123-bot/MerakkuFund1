@@ -11,18 +11,22 @@ import math
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
+                           backfill_outcomes_capability,
                            backtest_capability, backtest_matrix_capability,
                            backtest_strategies_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
+                           lab_backtest_capability,
                            discover_markets_capability, domain_capability,
                            evaluate_skill_capability, hunt_alpha_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
+                           plot_market_capability, relational_alpha_capability,
+                           research_alpha_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
-                           strategy_capability)
+                           scan_opportunities_capability, strategy_capability)
 
 
 def _norm_cdf(x: float) -> float:
@@ -272,6 +276,228 @@ def default_registry() -> list:
         return {"query": query, "crypto": crypto, "n_crypto": len(crypto),
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
 
+    def scan_opportunities(query, limit=12):
+        """Dry-run opportunity monitor (colleague's Lab LabMonitor), driven from Ask:
+        score live active markets with a Lab strategy and rank actionable trades."""
+        from polyagents.lab.monitor import LabMonitor, MonitorRequest
+        from polyagents.lab.strategies import STRATEGIES
+        q = (query or "").lower()
+        # match a named Lab strategy by keyword vs its versioned id (momentum→momentum-v1),
+        # else fall back to the default factor model
+        chosen = next((sid for sid in STRATEGIES
+                       if any(len(w) >= 4 and w in sid for w in q.split())), None)
+        req_kw = {"limit": limit, "include_holds": False}   # Ask wants actionable ideas
+        if chosen:
+            req_kw["strategy_id"] = chosen
+        try:
+            monitor = LabMonitor(client=eng.client, config=eng.config)
+            out = monitor.scan(MonitorRequest(**req_kw))
+        except Exception as exc:                            # degrade honestly, never fabricate
+            return {"query": query, "n": 0, "opportunities": [],
+                    "error": f"{type(exc).__name__}: {exc}"}
+        return {"query": query, **out}
+
+    # ----- pack: alpha-research (event-relatedness engine + strategy review) -----
+
+    def _recent_change(token_id, bars=24):
+        """Recent price move for a token (last close vs ~`bars` bars ago)."""
+        c = eng.client.fetch_price_history(token_id, interval="max") or []
+        if len(c) < 2:
+            return 0.0
+        ref = c[-min(bars, len(c))].close
+        return round(float(c[-1].close) - float(ref), 4)
+
+    def _winner_set(query, scan_limit=90):
+        """Resolve the target and find its mutually-exclusive winner set — the YES side
+        of every 'Will <X> win the <same event>?' market (e.g. all WC champions)."""
+        tgt = resolve(query)
+        if tgt.get("error"):
+            return None, tgt
+        tq = str(tgt.get("question", "")).lower()
+        if " win " not in tq:                               # not a 'win the X' target
+            return {"target": tgt, "event": None, "siblings": []}, None
+        event_key = tq.split(" win ", 1)[1].strip(" ?.")    # e.g. "the 2026 fifa world cup"
+        rows = mcp_server.scan_markets(limit=scan_limit, min_volume_24h=0.0)
+        sibs, seen = [], set()
+        for r in rows:
+            q = str(r.get("question", "")).lower()
+            if r.get("outcome") != "YES" or " win " not in q or event_key not in q:
+                continue
+            if r.get("question") in seen:
+                continue
+            seen.add(r.get("question"))
+            sibs.append({"question": r.get("question"), "token_id": r.get("token_id"),
+                         "price": float(r.get("price") or 0.0)})
+        return {"target": tgt, "event": event_key, "siblings": sibs}, None
+
+    def relational_alpha(query, top_k=8):
+        """Event-relatedness engine: winner-set consistency + redistribution + lag
+        detection + what-if. Deterministic, computed from live prices + candle history."""
+        ws, err = _winner_set(query)
+        if err:
+            return {"query": query, "error": err["error"]}
+        tgt, sibs, event = ws["target"], ws["siblings"], ws["event"]
+        tgt_sib = next((s for s in sibs if s["question"] == tgt.get("question")), None)
+        if event is None or tgt_sib is None or len(sibs) < 3:
+            return {"query": query, "target": tgt, "event": event, "siblings_n": len(sibs),
+                    "note": "未找到清晰的互斥冠军集(目标非 'win the X' 型,或同组市场太少),关联推理不适用。"}
+        tgt_price = tgt_sib["price"]
+        field_sum = sum(s["price"] for s in sibs)
+        rest = field_sum - tgt_price
+        w = (tgt_price / rest) if rest > 0 else 0.0         # target's share of "the rest of the field"
+
+        rivals = sorted((s for s in sibs if s["token_id"] != tgt_sib["token_id"]),
+                        key=lambda s: -s["price"])[:top_k]
+        tgt_delta = _recent_change(tgt_sib["token_id"])
+        rival_moves, released = [], 0.0
+        for r in rivals:
+            d = _recent_change(r["token_id"])
+            rival_moves.append({**r, "delta": d})
+            if d < 0:
+                released += -d                              # probability "released" by a rival crashing
+        implied_rise = round(w * released, 4)              # what the target SHOULD have gained
+        lag_gap = round(implied_rise - max(0.0, tgt_delta), 4)   # …minus what it actually gained
+        signal = "buy" if lag_gap > 0.01 else ("watch" if lag_gap > 0.003 else "none")
+
+        # ---- fair-probability synthesizer (structural): field-implied + lag correction ----
+        p_field = tgt_price / field_sum if field_sum else tgt_price     # vig-free field consensus
+        lag_adj = round(0.5 * lag_gap, 4)                               # half the un-repriced field move
+        fair_p = round(max(0.01, min(0.99, p_field + lag_adj)), 4)
+        edge_structural = round(fair_p - tgt_price, 4)
+
+        whatif = []
+        for r in rivals[:5]:
+            newrest = field_sum - r["price"]
+            tgt_new = tgt_price + r["price"] * (tgt_price / newrest) if newrest > 0 else tgt_price
+            whatif.append({"question": r["question"], "rival_price": round(r["price"], 4),
+                           "target_fair_if_out": round(tgt_new, 4),
+                           "delta": round(tgt_new - tgt_price, 4)})
+        return {"query": query, "target": {**tgt, "price": round(tgt_price, 4),
+                                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
+                "event": event, "n_field": len(sibs), "field_sum": round(field_sum, 3),
+                "consistency": ("overround(市场加价)" if field_sum > 1.03
+                                else "underround(反常低估)" if field_sum < 0.97 else "tight(接近无套利)"),
+                "target_recent_delta": tgt_delta, "field_released": round(released, 4),
+                "implied_target_rise": implied_rise, "lag_gap": lag_gap, "signal": signal,
+                "fair_prob": fair_p, "edge_vs_market": edge_structural,
+                "prob_sources": {"field_implied": round(p_field, 4), "lag_adj": lag_adj},
+                "top_rivals": rival_moves[:6], "what_if": whatif}
+
+    def research_alpha(query):
+        """Strategy review: run the relational engine + news, then have the LLM judge
+        whether the user's thesis has alpha and propose concrete improvements — grounded
+        strictly in the computed numbers (no fabricated data)."""
+        import json as _json
+        rel = relational_alpha(query)
+        news = news_sentiment(query)
+        news_sig = news.get("signal") if isinstance(news, dict) else None
+        news_mean = news.get("mean_sentiment") if isinstance(news, dict) else None
+
+        # ---- synthesize ONE fair probability: structural (field+lag) + news adjustment ----
+        synth = None
+        if not rel.get("error") and rel.get("fair_prob") is not None:
+            news_adj = round(max(-0.03, min(0.03, (news_mean or 0.0) * 0.03)), 4)
+            base = rel["fair_prob"]                              # field-implied + lag
+            fair = round(max(0.01, min(0.99, base + news_adj)), 4)
+            market = (rel.get("target") or {}).get("price") or 0.0
+            tight = 0.97 <= (rel.get("field_sum") or 0) <= 1.03
+            conf = ("高" if tight and (rel.get("n_field") or 0) >= 4 and news_mean is not None
+                    else "中" if tight else "低")
+            synth = {"fair_prob": fair, "market_price": market,
+                     "edge_vs_market": round(fair - market, 4), "confidence": conf,
+                     "sources": {**rel.get("prob_sources", {}), "news_adj": news_adj}}
+        evidence = _json.dumps({"synthesized_fair_prob": synth, "relational": rel,
+                                "news_signal": news_sig, "news_mean": news_mean},
+                               ensure_ascii=False, default=str)[:2600]
+        review = None
+        try:
+            sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
+                   "thesis/strategy. Using ONLY the computed evidence provided (a synthesized fair "
+                   "probability, a winner-set relational analysis, a news-sentiment signal), judge "
+                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the "
+                   "verdict on synthesized_fair_prob vs market (edge_vs_market) and cite the actual "
+                   "numbers (fair_prob, edge, lag_gap, what-if deltas). Never invent data; if evidence "
+                   "is thin, say so and say what data would settle it. Answer in the user's language, "
+                   "<180 words, as: 1) 复述策略 2) alpha 判定(据合成概率与数据) 3) 改进建议.")
+            user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
+            resp = eng._get_llm().invoke([("system", sys), ("user", user)])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            review = str(text).strip()
+        except Exception as exc:
+            review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
+        return {"query": query, "synth": synth, "relational": rel,
+                "news_signal": news_sig, "review": review}
+
+    # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
+
+    def backfill_outcomes(query, limit=1000):
+        """Label stored collection snapshots with realised outcomes, so the Lab
+        feature-strategies can backtest on real data. Writes to eng.store — the
+        shared cloud Postgres when POLYAGENTS_DATABASE_URL is set, else local SQLite."""
+        from datetime import datetime, timezone
+        store = getattr(eng, "store", None)
+        if store is None:
+            return {"error": "no data store configured (persist_enabled=False?)"}
+        raw = eng.client.list_resolved_markets(limit=limit)      # token -> realised outcome
+        resolved = {m.token_id: (1 if m.price >= 0.5 else 0)
+                    for m in eng.client.to_markets(raw) if m.outcome == "YES"}
+        cols = store.fetch_collections(limit=limit)
+        now = datetime.now(timezone.utc).isoformat()
+        already = newly = unresolved = 0
+        for row in cols:
+            bundle = row.get("raw") or {}
+            lab = bundle.get("lab") or {}
+            if lab.get("outcome") is not None:
+                already += 1; continue
+            tok = row["token_id"]
+            if tok in resolved:
+                bundle = {**bundle, "lab": {**lab, "outcome": resolved[tok],
+                                            "outcome_source": "resolved_market", "labeled_at": now}}
+                store.record_collection(tok, row["as_of"], row.get("question") or "",
+                                        row.get("market_price") or 0.5, bundle)
+                newly += 1
+            else:
+                unresolved += 1
+        backend = "postgres" if getattr(store.engine, "dialect", None) and \
+            store.engine.dialect.name == "postgresql" else "sqlite"
+        return {"query": query, "backend": backend, "scanned": len(cols),
+                "already_labeled": already, "newly_labeled": newly,
+                "still_unresolved": unresolved, "labeled_total": already + newly,
+                "store_counts": store.counts()}
+
+    def lab_backtest(query):
+        """Run the colleague's Lab evidence backtest: a Lab feature-strategy scored over
+        the labelled collection snapshots -> EvaluationReport metrics + promotion gates."""
+        from datetime import datetime, timezone
+        from polyagents.lab.backtest import BacktestRunner, get_report
+        from polyagents.lab.schemas import BacktestRequest
+        from polyagents.lab.strategies import DEFAULT_STRATEGY_ID, STRATEGIES
+        q = (query or "").lower()
+        sid = next((s for s in STRATEGIES if any(len(w) >= 4 and w in s for w in q.split())),
+                   DEFAULT_STRATEGY_ID)
+        cat = categorize(query or "")
+        req = BacktestRequest(
+            hypothesis_id=f"ask_{abs(hash(query)) % 10**8}",
+            time_window={"start": "2000-01-01T00:00:00+00:00",
+                         "end": datetime.now(timezone.utc).isoformat()},
+            market_filter={"category": cat if cat != "other" else "all", "settled_only": True},
+            model_version="ask", prompt_version="ask", calibrator_id="market",
+            strategy_id=sid, pit_strict=False, max_markets=200)
+        try:
+            result = BacktestRunner(client=eng.client, store=getattr(eng, "store", None)).run(req)
+        except Exception as exc:
+            return {"query": query, "strategy_id": sid, "error": f"{type(exc).__name__}: {exc}"}
+        report = get_report(result.report_id) or {}
+        m = report.get("metrics", {}) or {}
+        dq = report.get("data_quality", {}) or {}
+        return {"query": query, "strategy_id": sid, "category": cat,
+                "n": result.forecast_count, "uses_fixture": bool(dq.get("uses_fixture_data")),
+                "brier_delta": m.get("brier_delta"), "brier_model": m.get("brier_model"),
+                "brier_market": m.get("brier_market"), "ece": m.get("ece"),
+                "gates": report.get("gates"), "report_id": result.report_id}
+
     # ----- vertical pack capabilities: news-events / microstructure ----------
 
     def settle_and_reflect(query):
@@ -452,20 +678,28 @@ def default_registry() -> list:
     #   resolve_market -> analyze_market
     #   explore -> reason -> analyze -> backtest (historical comparison) -> conclude
 
+    def _best_match(rows, words):
+        """The scanned row whose English question shares the most query words."""
+        best, best_hits = None, 0
+        for row in rows:
+            q = str(row.get("question", "")).lower()
+            hits = sum(1 for w in words if w in q)
+            if hits > best_hits:
+                best, best_hits = row, hits
+        return best, best_hits
+
     def resolve(query):
         """Pick ONE concrete market for the request: explicit token id, else best
         keyword match among live markets, else the most active."""
         q = (query or "").strip()
         m = mcp_server._get_market(q) if q else None      # exact token id?
         if m is None:
-            rows = mcp_server.scan_markets(limit=25, min_volume_24h=0.0)
-            words = {w for w in q.lower().split() if len(w) > 2}
-            best, best_hits = None, 0
-            for row in rows:
-                hits = sum(1 for w in words if w in str(row.get("question", "")).lower())
-                if hits > best_hits:
-                    best, best_hits = row, hits
-            if best is not None:
+            rows = mcp_server.scan_markets(limit=40, min_volume_24h=0.0)
+            best, best_hits = _best_match(rows, {w for w in q.lower().split() if len(w) > 2})
+            if best_hits == 0:                            # no English overlap (e.g. a Chinese name):
+                terms = {w for t in _topic_terms(q) for w in _words(t)}   # LLM-translate, then retry
+                best, best_hits = _best_match(rows, terms)
+            if best is not None and best_hits > 0:
                 return {"token_id": best["token_id"], "question": best["question"],
                         "price": best["price"], "matched_by": f"keywords({best_hits})"}
             m = eng.most_active_market()                   # nothing matched
@@ -651,6 +885,61 @@ def default_registry() -> list:
         bb = _rs(market, graph=eng, config=eng.config, strategy="full")
         return bb.risk
 
+    # ----- visualization: build a chart spec (rendered to SVG by the web layer) --
+
+    def _price_series(token_id, label, cap=140):
+        """A downsampled (ts, close) price series for one market token."""
+        candles = eng.client.fetch_price_history(token_id, interval="max") or []
+        pts = [[c.ts.isoformat(), round(float(c.close), 4)] for c in candles]
+        if len(pts) > cap:                                  # even downsample to keep the SVG light
+            step = len(pts) / cap
+            pts = [pts[int(i * step)] for i in range(cap)]
+        return {"label": label, "points": pts}
+
+    def plot_market(query):
+        """Pick chart type + target from the request and return a chart spec:
+        line/area (one market's price trend), multi (compare several), or bar
+        (snapshot of current prices)."""
+        q = (query or "").lower()
+        if any(w in q for w in ("对比", "比较", "compare", "versus", " vs ")):
+            ctype = "multi"
+        elif any(w in q for w in ("柱", "bar", "直方")):
+            ctype = "bar"
+        elif any(w in q for w in ("面积", "area")):
+            ctype = "area"
+        else:
+            ctype = "line"
+
+        if ctype in ("line", "area"):
+            r = resolve(query)
+            if r.get("error"):
+                return {"type": ctype, "query": query, "error": r["error"], "series": []}
+            s = _price_series(r["token_id"], r.get("question") or "market")
+            if not s["points"]:
+                return {"type": ctype, "query": query, "title": r.get("question"),
+                        "series": [], "error": "该市场无价格历史"}
+            return {"type": ctype, "query": query, "title": r.get("question"),
+                    "y_label": "price", "series": [s]}
+
+        cands = (discover(query).get("markets") or [])
+        if ctype == "bar":
+            bars = [{"label": (c.get("question") or "")[:22],
+                     "value": round(float(c.get("price") or 0.0), 4)} for c in cands[:8]]
+            return {"type": "bar", "query": query, "title": f"当前价格快照:{query}",
+                    "y_label": "price", "bars": bars,
+                    **({"error": "没找到相关市场"} if not bars else {})}
+        # multi: compare several markets' price trends
+        series = []
+        for c in cands[:4]:
+            if not c.get("token_id"):
+                continue
+            s = _price_series(c["token_id"], (c.get("question") or "")[:26])
+            if s["points"]:
+                series.append(s)
+        return {"type": "multi", "query": query, "title": f"价格走势对比:{query}",
+                "y_label": "price", "series": series,
+                **({"error": "没找到可对比的市场"} if not series else {})}
+
     return [
         data_capability(fetch),
         backtest_capability(backtest),
@@ -662,6 +951,12 @@ def default_registry() -> list:
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
+        scan_opportunities_capability(scan_opportunities),
+        plot_market_capability(plot_market),
+        relational_alpha_capability(relational_alpha),
+        research_alpha_capability(research_alpha),
+        backfill_outcomes_capability(backfill_outcomes),
+        lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),
         portfolio_review_capability(portfolio_review),
         paper_trade_capability(paper_trade),

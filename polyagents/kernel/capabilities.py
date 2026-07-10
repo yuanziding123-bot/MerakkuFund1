@@ -255,6 +255,109 @@ def hunt_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_hunt"}), run, cost=5)
 
 
+def scan_opportunities_capability(fn: Callable) -> Capability:
+    """Dry-run opportunity monitor — score live markets with a Lab strategy and rank
+    actionable trades (Lab's ``LabMonitor.scan``). ``fn(query) -> dict`` builds a live
+    read-only feature bundle per active market, scores it with the strategy's factor
+    model, sizes a paper position through the risk gate, and returns a ranked board of
+    (action, edge, size) — always dry-run. This is the Ask-side 'what's actually worth
+    trading right now' scan, backed by the Lab strategy library."""
+    def run(ctx: Context) -> dict:
+        return {"opportunities": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("scan_opportunities",
+                      "Scan live active markets with a Lab strategy and rank concrete, "
+                      "actionable DRY-RUN trades — each with action (buy/sell/hold), edge, "
+                      "sized paper position, and reasons. Use for 'what should I trade now', "
+                      "'scan for trade signals / opportunities to buy', 'run the monitor'. "
+                      "(Read-only, no orders; the strategy-scored complement to hunt_alpha.)",
+                      frozenset({"question"}), frozenset({"opportunities"}), run, cost=6)
+
+
+def relational_alpha_capability(fn: Callable) -> Capability:
+    """Event-relatedness engine (pack: alpha-research). ``fn(query) -> dict`` builds the
+    target's mutually-exclusive winner set, checks field consistency (Σ prices vs 1),
+    computes redistribution + a lag signal (a rival crashed but the target hasn't repriced
+    → underpriced), and a what-if sensitivity (if rival X is eliminated → target fair prob).
+    Deterministic, computed from live prices + candle history."""
+    def run(ctx: Context) -> dict:
+        return {"relational_alpha": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("relational_alpha",
+                      "Cross-event / relational analysis of a target market: winner-set "
+                      "consistency, redistribution + lag detection (a related event moved but "
+                      "the target hasn't → edge), and what-if sensitivity to rivals. Use for "
+                      "'is <team> underpriced vs the field', 'how does <other event> affect <target>', "
+                      "'关联/事件关联性/别的场次对这场的影响'. Computed, no fabrication.",
+                      frozenset({"question"}), frozenset({"relational_alpha"}), run, cost=5)
+
+
+def research_alpha_capability(fn: Callable) -> Capability:
+    """Strategy alpha review (pack: alpha-research). ``fn(query) -> dict`` runs the relational
+    engine + news, then judges whether the user's thesis has alpha and proposes concrete
+    improvements — grounded strictly in the computed numbers. The Ask-side 'validate my
+    strategy + tell me how to improve it' deliverable."""
+    def run(ctx: Context) -> dict:
+        return {"alpha_review": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("research_alpha",
+                      "Validate a trading THESIS/STRATEGY the user proposes and suggest "
+                      "improvements: gather relational (cross-event) evidence + news, judge if "
+                      "it has alpha with the numbers, and give concrete, data-grounded fixes. Use "
+                      "for '验证我的策略有没有 alpha / 帮我改进策略 / research whether <thesis> has edge'.",
+                      frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
+
+
+def plot_market_capability(fn: Callable) -> Capability:
+    """Visualize market data as a chart (core, always-on).
+
+    ``fn(query) -> dict`` picks the chart type + target from the request and returns a
+    chart spec (series of points / bars) that the web layer renders as an inline SVG —
+    price trend over time (line / area), several markets compared (multi-line), or a
+    snapshot bar chart of current prices."""
+    def run(ctx: Context) -> dict:
+        return {"chart": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("plot_market",
+                      "Draw a CHART of market data as an inline SVG: a market's price trend "
+                      "over time (line/area), several markets compared (multi-line), or a bar "
+                      "chart of current prices. Use for 'plot / chart / visualize / 画图 / "
+                      "画出…的价格走势 / 走势图 / 把…可视化 / 对比…的走势'. Renders a picture, not a table.",
+                      frozenset({"question"}), frozenset({"chart"}), run, cost=3)
+
+
+def backfill_outcomes_capability(fn: Callable) -> Capability:
+    """Label stored market snapshots with their realised outcome (pack: lab-backtest).
+
+    ``fn(query) -> dict`` walks the collection cache in the shared data store (cloud
+    Postgres when POLYAGENTS_DATABASE_URL is set, else local SQLite), looks up which of
+    those markets have since resolved, and writes ``lab.outcome`` (0/1) back — turning
+    accumulated snapshots into a labelled backtest set the Lab strategies can score."""
+    def run(ctx: Context) -> dict:
+        return {"outcome_backfill": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("backfill_outcomes",
+                      "Backfill realised outcomes onto stored market snapshots: find which "
+                      "collected markets have resolved and label them (writes to the shared "
+                      "cloud DB). Run this to feed the Lab backtest with real data. Use for "
+                      "'backfill outcomes', 'label the collected snapshots', 'prepare Lab data'.",
+                      frozenset({"question"}), frozenset({"outcome_backfill"}), run, cost=4)
+
+
+def lab_backtest_capability(fn: Callable) -> Capability:
+    """Run a Lab feature-strategy over the labelled snapshots (pack: lab-backtest).
+
+    ``fn(query) -> dict`` runs the colleague's ``BacktestRunner.run`` evidence path — a
+    chosen Lab strategy (linear-factor / momentum / flow / sentiment / …) scored over the
+    stored collection bundles with resolved outcomes — and returns the EvaluationReport
+    metrics + promotion gates. Needs backfill_outcomes to have labelled data first, else
+    it honestly reports it fell back to fixtures."""
+    def run(ctx: Context) -> dict:
+        return {"lab_backtest": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("lab_backtest",
+                      "Run the Lab's feature-based backtest: score a Lab strategy over the "
+                      "labelled market snapshots and return Brier vs market + calibration + "
+                      "promotion gates (paper-ready?). The deep evidence backtest, distinct "
+                      "from the candle-signal backtest_strategies. Use for 'run the Lab "
+                      "backtest', 'backtest strategy X with the Lab evidence path'.",
+                      frozenset({"question"}), frozenset({"lab_backtest"}), run, cost=6)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 

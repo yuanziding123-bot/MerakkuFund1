@@ -824,6 +824,265 @@ def _format_alpha_hunt(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+_CHART_COLORS = ["#7dab7d", "#c9ae62", "#c98276", "#9fb9d6", "#b48ead", "#83b6b6"]
+
+
+def _svg_esc(s) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _render_svg_chart(spec: dict) -> str:
+    """Self-contained inline SVG for a chart spec (line / area / multi / bar).
+    Styled for the warm-dark chat bubble; responsive via width:100%."""
+    W, H = 680, 300
+    L, R, T, B = 48, 16, 24, 52
+    pw, ph = W - L - R, H - T - B
+    ctype = spec.get("type", "line")
+    grid, txt = "rgba(255,255,255,.09)", "#aea69c"
+    out = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" '
+           f'role="img" style="width:100%;height:auto;font-family:Inter,system-ui,sans-serif">']
+    if spec.get("title"):
+        out.append(f'<text x="{L}" y="15" fill="#dad2c1" font-size="12" font-weight="600">'
+                   f'{_svg_esc(str(spec["title"])[:64])}</text>')
+
+    def _empty(msg: str) -> str:
+        out.append(f'<text x="{L}" y="{T + ph / 2:.0f}" fill="{txt}" font-size="12">{_svg_esc(msg)}</text>')
+        out.append("</svg>")
+        return "".join(out)
+
+    if ctype == "bar":
+        bars = spec.get("bars") or []
+        if not bars:
+            return _empty(spec.get("error") or "无数据")
+        vmax = (max((b["value"] for b in bars), default=1.0) or 1.0) * 1.15
+        n, gap = len(bars), 10
+        bw = (pw - gap * (n - 1)) / n
+        for i in range(4):
+            gy = T + ph * i / 3
+            out.append(f'<line x1="{L}" y1="{gy:.1f}" x2="{W - R}" y2="{gy:.1f}" stroke="{grid}"/>')
+            out.append(f'<text x="{L - 6}" y="{gy + 3:.1f}" fill="{txt}" font-size="9" '
+                       f'text-anchor="end">{vmax * (1 - i / 3):.2f}</text>')
+        for i, b in enumerate(bars):
+            x = L + i * (bw + gap)
+            bh = ph * (b["value"] / vmax)
+            y = T + ph - bh
+            out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bh:.1f}" '
+                       f'rx="2" fill="{_CHART_COLORS[i % 6]}"/>')
+            out.append(f'<text x="{x + bw / 2:.1f}" y="{y - 3:.1f}" fill="#dad2c1" font-size="9" '
+                       f'text-anchor="middle">{b["value"]:.3f}</text>')
+            out.append(f'<text x="{x + bw / 2:.1f}" y="{T + ph + 13:.1f}" fill="{txt}" font-size="8" '
+                       f'text-anchor="middle">{_svg_esc(str(b["label"])[:12])}</text>')
+        out.append("</svg>")
+        return "".join(out)
+
+    # ---- time-series: line / area / multi ----
+    series = [s for s in (spec.get("series") or []) if s.get("points")]
+    if not series:
+        return _empty(spec.get("error") or "无价格历史")
+    ys = [p[1] for s in series for p in s["points"]]
+    ymin, ymax = min(ys), max(ys)
+    if ymax - ymin < 1e-6:
+        ymax = ymin + 0.01
+    padv = (ymax - ymin) * 0.08
+    ymin, ymax = ymin - padv, ymax + padv
+
+    def _x(i, n):
+        return L + pw * (i / (n - 1) if n > 1 else 0)
+
+    def _y(v):
+        return T + ph * (1 - (v - ymin) / (ymax - ymin))
+
+    for i in range(4):
+        gy = T + ph * i / 3
+        out.append(f'<line x1="{L}" y1="{gy:.1f}" x2="{W - R}" y2="{gy:.1f}" stroke="{grid}"/>')
+        out.append(f'<text x="{L - 6}" y="{gy + 3:.1f}" fill="{txt}" font-size="9" '
+                   f'text-anchor="end">{ymax - (ymax - ymin) * i / 3:.3f}</text>')
+    p_first = str(series[0]["points"][0][0])[:10]
+    p_last = str(series[0]["points"][-1][0])[:10]
+    out.append(f'<text x="{L}" y="{T + ph + 14:.0f}" fill="{txt}" font-size="9">{p_first}</text>')
+    out.append(f'<text x="{W - R}" y="{T + ph + 14:.0f}" fill="{txt}" font-size="9" text-anchor="end">{p_last}</text>')
+    for si, s in enumerate(series):
+        col = _CHART_COLORS[si % 6]
+        pts = s["points"]
+        n = len(pts)
+        d = " ".join(f'{_x(i, n):.1f},{_y(p[1]):.1f}' for i, p in enumerate(pts))
+        if ctype == "area" and len(series) == 1:
+            out.append(f'<polygon points="{_x(0, n):.1f},{T + ph:.1f} {d} {_x(n - 1, n):.1f},{T + ph:.1f}" '
+                       f'fill="{col}" fill-opacity="0.15"/>')
+        out.append(f'<polyline points="{d}" fill="none" stroke="{col}" stroke-width="1.6"/>')
+    if len(series) > 1:                                      # legend row for multi
+        lx = L
+        for si, s in enumerate(series):
+            out.append(f'<rect x="{lx:.0f}" y="{H - 14}" width="9" height="9" rx="2" fill="{_CHART_COLORS[si % 6]}"/>')
+            lab = str(s["label"])[:16]
+            out.append(f'<text x="{lx + 12:.0f}" y="{H - 6}" fill="{txt}" font-size="9">{_svg_esc(lab)}</text>')
+            lx += 20 + len(lab) * 5.6
+    out.append("</svg>")
+    return "".join(out)
+
+
+def _format_chart(a: dict, path: str) -> str:
+    """Render a chart spec as a titled inline SVG (passed through the md renderer)."""
+    label = {"line": "价格走势", "area": "价格走势", "multi": "走势对比", "bar": "价格快照"}.get(a.get("type"), "图表")
+    lines = [f"**{label} · plot_market** · {path}", ""]
+    if a.get("error") and not (a.get("series") or a.get("bars")):
+        lines.append(f"画图失败:{a['error']}")
+        return "\n".join(lines)
+    lines.append("```svg")                                  # svg fence → md renderer emits it raw
+    lines.append(_render_svg_chart(a))
+    lines.append("```")
+    lines.append(f"\n_数据来自价格历史(只读)。图型:{a.get('type')}。想换类型就说'柱状图/面积图/对比走势';想深挖 → analyze_market。_")
+    return "\n".join(lines)
+
+
+def _format_relational(a: dict, path: str) -> str:
+    """Render the event-relatedness engine: winner-set consistency + lag + what-if."""
+    if a.get("error"):
+        return f"**关联推理 · relational_alpha** · {path}\n\n失败:{a['error']}"
+    tgt = a.get("target") or {}
+    lines = [f"**关联推理引擎 · relational_alpha** · {path}", ""]
+    if a.get("note"):
+        lines.append(f"**标的**:{tgt.get('question')}\n\n{a['note']}")
+        return "\n".join(lines)
+    lines.append(f"**标的**:{tgt.get('question')}  \n市场价 {tgt.get('price')} · 冠军集内应有份额 {tgt.get('fair_share')}")
+    if a.get("fair_prob") is not None:
+        src = a.get("prob_sources") or {}
+        edge = a.get("edge_vs_market")
+        verdict = "低估→偏买" if isinstance(edge, (int, float)) and edge > 0.005 else \
+                  ("高估→偏卖" if isinstance(edge, (int, float)) and edge < -0.005 else "接近公允")
+        lines.append(f"\n**合成公允概率(结构性)= {a.get('fair_prob')}** · 市场 {tgt.get('price')} · "
+                     f"**edge {edge:+}** · {verdict}")
+        lines.append(f"　来源:冠军集隐含 {src.get('field_implied')} + 滞后修正 {src.get('lag_adj'):+}")
+    lines.append(f"\n**① 冠军集一致性**:{a.get('n_field')} 个互斥标的,Σ价格 = **{a.get('field_sum')}** · {a.get('consistency')}")
+    sig = a.get("signal")
+    tag = "🟢 买入" if sig == "buy" else ("🟡 观察" if sig == "watch" else "⚪ 无")
+    lines.append(f"\n**② 再分配 + 滞后检测**(别的场次一动、这场跟没跟上)")
+    lines.append(f"　对手近期共释放概率 {a.get('field_released')} → 目标**应涨** {a.get('implied_target_rise')};"
+                 f"实际涨 {a.get('target_recent_delta')} → **lag_gap = {a.get('lag_gap')}** · 信号 **{tag}**")
+    rivals = a.get("top_rivals") or []
+    if rivals:
+        lines.append("\n| 主要对手 | 价格 | 近期Δ |")
+        lines.append("|---|---|---|")
+        for r in rivals:
+            lines.append(f"| {(r.get('question') or '')[:34]} | {round(r.get('price',0),4)} | {r.get('delta'):+} |")
+    wi = a.get("what_if") or []
+    if wi:
+        lines.append("\n**③ What-if(某对手出局 → 目标应有概率)**")
+        lines.append("\n| 若此对手出局 | 目标公允 | Δ |")
+        lines.append("|---|---|---|")
+        for w in wi:
+            lines.append(f"| {(w.get('question') or '')[:34]} | {w.get('target_fair_if_out')} | {w.get('delta'):+} |")
+    lines.append("\n_lag_gap>0 = 场上事件已动、目标价还没跟上(潜在买点);Σ≈1 为无套利基准,偏离即结构性错价。"
+                 "均为**关联隐含信号**,想验证某策略 → research_alpha。_")
+    return "\n".join(lines)
+
+
+def _format_alpha_review(a: dict, path: str) -> str:
+    """Render the strategy review: LLM verdict + improvements over the computed evidence."""
+    if a.get("error"):
+        return f"**策略评审 · research_alpha** · {path}\n\n失败:{a['error']}"
+    lines = [f"**策略评审 · research_alpha** · {path}", ""]
+    s = a.get("synth")
+    if s:
+        edge = s.get("edge_vs_market")
+        verdict = "低估 → 偏买" if isinstance(edge, (int, float)) and edge > 0.005 else \
+                  ("高估 → 偏卖" if isinstance(edge, (int, float)) and edge < -0.005 else "接近公允")
+        src = s.get("sources") or {}
+        lines.append(f"**合成公允概率 = {s.get('fair_prob')}** · 市场 {s.get('market_price')} · "
+                     f"**edge {edge:+}** · {verdict} · 置信 {s.get('confidence')}")
+        lines.append(f"　来源:冠军集隐含 {src.get('field_implied')} + 滞后修正 {src.get('lag_adj'):+} "
+                     f"+ 新闻调整 {src.get('news_adj'):+}\n")
+    if a.get("review"):
+        lines.append(a["review"])
+    if a.get("news_signal"):
+        lines.append(f"\n_新闻情绪信号:{a['news_signal']}_")
+    rel = a.get("relational") or {}
+    if rel and not rel.get("error"):
+        lines.append("\n---\n\n**关联证据(计算所得,评审依据):**")
+        lines.append(_format_relational(rel, path).split("\n", 2)[-1])   # drop the header line
+    return "\n".join(lines)
+
+
+def _format_backfill(a: dict, path: str) -> str:
+    """Render the outcome-backfill: how many stored snapshots got labelled."""
+    if a.get("error"):
+        return f"**结果回填 · backfill_outcomes** · {path}\n\n失败:{a['error']}"
+    c = a.get("store_counts") or {}
+    lines = [f"**结果回填 · backfill_outcomes** · {path}", "",
+             f"_库:**{a.get('backend')}**{'(云端)' if a.get('backend')=='postgres' else '(本地)'} · 主题:{a.get('query')}_"]
+    lines.append(f"\n扫了 **{a.get('scanned')}** 条已存快照:")
+    lines.append("\n| 结果 | 数量 |")
+    lines.append("|---|---|")
+    lines.append(f"| ✅ 本次新标注(已结算) | **{a.get('newly_labeled')}** |")
+    lines.append(f"| 之前已标注 | {a.get('already_labeled')} |")
+    lines.append(f"| ⏳ 尚未结算(留待下次) | {a.get('still_unresolved')} |")
+    lines.append(f"| **带标签总计(可回测)** | **{a.get('labeled_total')}** |")
+    lines.append(f"\n_库存:candles {c.get('candles','?')} · trades {c.get('trades','?')} · "
+                 f"collections {c.get('collections','?')}。已结算的快照现在能喂给 **lab_backtest**;"
+                 f"未结算的等它们收敛后再跑一次 backfill 即可增量标注。_")
+    return "\n".join(lines)
+
+
+def _format_lab_backtest(a: dict, path: str) -> str:
+    """Render the Lab feature-strategy backtest (EvaluationReport metrics + gates)."""
+    if a.get("error"):
+        return f"**Lab 回测 · lab_backtest** · {path}\n\n失败:{a['error']}"
+    g = a.get("gates") or {}
+    lines = [f"**Lab 回测 · lab_backtest** · {path}", "",
+             f"_策略:**{a.get('strategy_id')}** · 领域:{a.get('category')} · 样本 n={a.get('n')}_"]
+    if a.get("uses_fixture"):
+        lines.append("\n⚠️ **跑的是 fixture(占位数据)** —— 该领域还没有带标签的真实快照。"
+                     "先跑 **backfill_outcomes**(并让 collect 攒够已结算样本)再回来。")
+        return "\n".join(lines)
+    bd = a.get("brier_delta")
+    verdict = "跑赢市场 ✅" if isinstance(bd, (int, float)) and bd > 0 else "未跑赢市场"
+    lines.append(f"\n**评估(vs 市场基线)** · {verdict}")
+    lines.append("\n| 指标 | 值 |")
+    lines.append("|---|---|")
+    lines.append(f"| Brier Δ(越正越好) | {_fmt(bd)} |")
+    lines.append(f"| Brier(模型 / 市场) | {_fmt(a.get('brier_model'))} / {_fmt(a.get('brier_market'))} |")
+    lines.append(f"| ECE(校准误差,越低越好) | {_fmt(a.get('ece'))} |")
+    lines.append("\n**晋级门(paper-ready 判定)**")
+    lines.append("\n| 门 | 通过 |")
+    lines.append("|---|---|")
+    for k in ("sample_adequate", "beats_market", "ece_pass", "pit_clean", "paper_ready"):
+        if k in g:
+            lines.append(f"| {k} | {'✅' if g[k] else '❌'} |")
+    lines.append(f"\n_Lab 证据回测:{a.get('strategy_id')} 在带标签快照上 vs 市场基线,含 bootstrap CI + 校准 + 晋级门。"
+                 f"报告 id `{a.get('report_id')}` 已落 Lab 账本。想扩样本 → backfill_outcomes / 多攒 collect。_")
+    return "\n".join(lines)
+
+
+def _fmt(x) -> str:
+    return f"{x:+.4f}" if isinstance(x, (int, float)) else "—"
+
+
+def _format_opportunities(a: dict, path: str) -> str:
+    """Render the Lab opportunity monitor: strategy-scored, ranked dry-run trades."""
+    opps = a.get("opportunities") or []
+    lines = [f"**机会监控 · scan_opportunities** · {path}", "",
+             f"_策略:{a.get('strategy_id', '—')} · 主题:{a.get('query')} · dry-run(不下单)_"]
+    if a.get("error"):
+        lines.append(f"\n扫描失败:{a['error']}")
+        return "\n".join(lines)
+    if not opps:
+        lines.append(f"\n{a.get('message') or '当前无可执行机会'} —— 没有市场越过 edge/风控门槛。这是常态,不是失败。")
+        return "\n".join(lines)
+    lines.append(f"\n扫到 **{a.get('n', len(opps))}** 个可执行机会(按 buy 优先 + edge 排序):")
+    lines.append("\n| 市场 | 动作 | edge | 建议仓位 | 模型p | 市场价 | APY |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for o in opps:
+        lines.append(f"| {(o.get('question') or '')[:30]} | **{o.get('action')}** | "
+                     f"{o.get('edge'):+.4f} | ${o.get('size_usdc'):.0f} | {o.get('p_cal'):.3f} | "
+                     f"{o.get('market_price'):.3f} | {o.get('apy'):+.2f} |")
+    top = opps[0]
+    if top.get("reasons"):
+        lines.append(f"\n**Top({(top.get('question') or '')[:40]})依据**:" + "；".join(str(x) for x in top["reasons"][:3]))
+    lines.append("\n_LabMonitor 打分:每个市场取 live 特征 → 策略因子模型出 p → 过 Kelly/风控给仓位。**dry-run,信号非确定性**。"
+                 "想深挖某个 → analyze_market;想验证该策略历史 → backtest_strategies / promotion_gate。_")
+    return "\n".join(lines)
+
+
 def _format_crypto_arb(a: dict, path: str) -> str:
     """Render the crypto cross-market arbitrage scan (spot vs implied probability)."""
     opps = a.get("opportunities") or []
@@ -991,8 +1250,16 @@ def _kernel_summary(ctx) -> str:
     # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
     if "microstructure" in f:                            # order-flow scan (focused)
         return _format_microstructure(f["microstructure"], path)
+    if "alpha_review" in f:                              # strategy validation + improvement
+        return _format_alpha_review(f["alpha_review"], path)
+    if "relational_alpha" in f:                          # event-relatedness engine
+        return _format_relational(f["relational_alpha"], path)
+    if "chart" in f:                                     # explicit visualization request
+        return _format_chart(f["chart"], path)
     if "news_sentiment" in f:                            # news + sentiment signal
         return _format_news(f["news_sentiment"], path)
+    if "opportunities" in f:                             # Lab monitor: strategy-scored actionable trades
+        return _format_opportunities(f["opportunities"], path)
     if "alpha_hunt" in f:                                # top-level opportunity hunt (broad)
         return _format_alpha_hunt(f["alpha_hunt"], path)
     if "skill_report" in f:                              # calibration / skill report
@@ -1003,6 +1270,10 @@ def _kernel_summary(ctx) -> str:
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
         return _format_promotion(f["promotion_verdict"], path)
+    if "lab_backtest" in f:                              # Lab feature-strategy evidence backtest
+        return _format_lab_backtest(f["lab_backtest"], path)
+    if "outcome_backfill" in f:                          # labelled snapshots for the Lab backtest
+        return _format_backfill(f["outcome_backfill"], path)
     if "backtest_matrix" in f:                           # strategy × domain matrix
         return _format_backtest_matrix(f["backtest_matrix"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison

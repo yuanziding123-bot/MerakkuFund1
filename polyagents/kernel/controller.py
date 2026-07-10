@@ -38,10 +38,27 @@ _SYS = (
     "(strategies ACROSS all domains) → backtest_matrix. "
     "'Is this strategy/domain paper-ready / good enough to promote / does it pass the gates' "
     "→ promotion_gate.\n"
+    "'Backfill / label outcomes on the stored snapshots', 'prepare the Lab data' → "
+    "backfill_outcomes. 'Run the LAB backtest', 'backtest strategy X with the Lab evidence "
+    "path / feature strategies' → lab_backtest (the feature-bundle backtest → EvaluationReport "
+    "+ gates, distinct from candle-signal backtest_strategies; both need the lab-backtest pack "
+    "loaded). Typical flow: backfill_outcomes THEN lab_backtest.\n"
     "'Find mispriced crypto markets', crypto arbitrage, 'Will BTC be above $X', hunting "
     "trading opportunities in crypto → find_crypto_arb.\n"
     "'Find alpha', 'scan for opportunities across markets', 'what's worth trading right now' "
     "(broad, not one named market/topic) → hunt_alpha (the top-level opportunity scan).\n"
+    "'What should I trade / buy now', 'give me trade signals / actionable ideas with sizing', "
+    "'run the monitor', 'scan markets with strategy X' → scan_opportunities (Lab monitor: "
+    "scores live markets with a strategy → ranked buy/sell/hold + edge + size, dry-run). "
+    "Prefer this over hunt_alpha when the user wants concrete SIZED actions, not just mispricings.\n"
+    "'Plot / chart / visualize / draw', '画出…的价格走势 / 走势图 / 画个图 / 把…可视化 / 用柱状图/面积图 / "
+    "对比…的走势' → plot_market (renders a picture: line/area price trend, multi-line comparison, "
+    "or bar of current prices). Use whenever the user wants a CHART/图, not a table of numbers.\n"
+    "'Validate my strategy / thesis has alpha', 'is my idea any good + how to improve it', "
+    "'验证我的策略有没有 alpha / 帮我改进策略' → research_alpha (formalize + relational evidence + "
+    "verdict + concrete improvements). 'Is <team> underpriced vs the field', 'how does <other "
+    "event/match> affect <target>', '事件关联性 / 别的场次对这场的影响 / 冠军集里谁被低估' → "
+    "relational_alpha (the computed cross-event engine). Both need the alpha-research pack loaded.\n"
     "'Scan microstructure / order flow', 'where is the smart money' → microstructure_scan "
     "(NOT hunt_alpha, NOT domain_answer). 'News / sentiment / headlines on X' → news_sentiment.\n"
     "'Run the data→signal→risk supervisor / multi-agent strategy / give me a decision on a "
@@ -51,8 +68,9 @@ _SYS = (
     "'Paper trade / take a position on / buy / sell a market (paper)' → resolve_market → "
     "paper_trade (only if that capability is loaded; it is gated).\n"
     "'Settle my trades / close resolved positions / what did we learn' → settle_and_reflect.\n"
-    "When a specialized capability (hunt_alpha / find_crypto_arb / microstructure_scan / "
-    "news_sentiment / strategy) fits the request, call exactly that ONE and answer from its "
+    "When a specialized capability (hunt_alpha / scan_opportunities / find_crypto_arb / "
+    "microstructure_scan / news_sentiment / strategy) fits the request, call exactly that ONE "
+    "and answer from its "
     "result — do NOT also call domain_answer or another scan for the same thing.\n"
     "ANALYZING / evaluating a market — a named one OR 'the most active market' / 'a liquid "
     "one' / 'this market' — goes through resolve_market → analyze_market (resolve_market "
@@ -113,11 +131,17 @@ def _short(v: Any, n: int = 160) -> str:
 
 
 def _render_history(history, max_turns: int = 8) -> str:
-    """Compact transcript of the recent conversation (bounded, for prompt context)."""
+    """Compact transcript of the recent conversation (bounded, for prompt context).
+
+    The two most recent turns keep a much larger budget so a follow-up can actually
+    reference the prior result (e.g. 'backtest the strategies you just found') — a
+    kernel result board runs ~1–2k chars and was previously cut to 300."""
+    turns = list(history or [])[-max_turns:]
     lines = []
-    for role, content in (history or [])[-max_turns:]:
+    for i, (role, content) in enumerate(turns):
         who = "User" if str(role) == "user" else "Assistant"
-        lines.append(f"{who}: {_short(content, 300)}")
+        cap = 1600 if i >= len(turns) - 2 else 400      # recent turns fuller, older ones compact
+        lines.append(f"{who}: {_short(content, cap)}")
     return "\n".join(lines)
 
 

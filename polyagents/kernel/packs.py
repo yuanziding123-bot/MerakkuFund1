@@ -10,9 +10,11 @@ from __future__ import annotations
 
 #: Always loaded — everyday research / analysis / recommendation / Q&A / opportunity hunt.
 CORE: list[str] = [
-    "hunt_alpha",                                       # top-level opportunity scan
+    "hunt_alpha",                                       # top-level opportunity scan (edge detectors)
+    "scan_opportunities",                              # Lab monitor: strategy-scored actionable trades
     "scan_markets", "resolve_market", "analyze_market",
     "discover_markets", "recommend_markets",
+    "plot_market",                                     # visualize as an inline SVG chart
     "evaluate_skill", "portfolio_review",              # do we have skill? / paper P&L
     "langgraph_answer", "domain_answer",
 ]
@@ -39,6 +41,20 @@ PACKS: dict[str, dict] = {
         "name": "新闻 / 事件情绪",
         "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
         "capabilities": ["news_sentiment"],
+    },
+    "alpha-research": {
+        "name": "关联 alpha 研究(策略验证 + 改进)",
+        "description": "针对一个标的验证你的策略/假设有没有 alpha,并给改进意见。核心是事件关联性:"
+                       "互斥冠军集一致性 + 再分配 + 滞后检测(别的场次一动、这场没跟上=机会)+ what-if "
+                       "敏感度,再叠加新闻情绪,LLM 据数给判定与改进。",
+        "capabilities": ["relational_alpha", "research_alpha"],
+    },
+    "lab-backtest": {
+        "name": "Lab 回测(特征策略 + 结果回填)",
+        "description": "先给已采集的市场快照回填结算结果(写入共享库,设了 POLYAGENTS_DATABASE_URL "
+                       "即云端 postgres),再用 Lab 的 7 个特征策略在带标签快照上跑完整回测"
+                       "(Brier vs 市场 + 校准 + 晋级门)。选中后 Ask 里可直接调用 Lab 回测。",
+        "capabilities": ["backfill_outcomes", "lab_backtest"],
     },
     # NOTE: the old "strategy-supervisor" pack (data→signal→risk supervisor) was pruned —
     # analyze_market fully supersedes it (signal + sized decision + backtest + reflection).
