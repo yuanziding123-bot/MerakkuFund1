@@ -1298,16 +1298,18 @@ def _kernel_summary(ctx) -> str:
         if "market_analysis" in f:                      # controller also deep-analyzed the pick
             out += "\n\n---\n\n" + _format_market_analysis(f["market_analysis"], path)
         return out
+    # Requested alpha/relational deliverables win over a generic market_analysis the
+    # controller may have also run as an intermediate step.
+    if "alpha_review" in f:                              # strategy validation + improvement
+        return _format_alpha_review(f["alpha_review"], path)
+    if "relational_alpha" in f:                          # event-relatedness engine
+        return _format_relational(f["relational_alpha"], path)
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
     # Final analytical deliverables win over intermediate steps (e.g. collections).
     # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
     if "microstructure" in f:                            # order-flow scan (focused)
         return _format_microstructure(f["microstructure"], path)
-    if "alpha_review" in f:                              # strategy validation + improvement
-        return _format_alpha_review(f["alpha_review"], path)
-    if "relational_alpha" in f:                          # event-relatedness engine
-        return _format_relational(f["relational_alpha"], path)
     if "chart" in f:                                     # explicit visualization request
         return _format_chart(f["chart"], path)
     if "news_sentiment" in f:                            # news + sentiment signal
