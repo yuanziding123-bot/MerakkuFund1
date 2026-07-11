@@ -24,9 +24,33 @@ services:
     networks:
       - default
       - agentlab-public
+    depends_on:
+      aihf-postgres:
+        condition: service_healthy
+
+  aihf-postgres:
+    image: pgvector/pg:pg16
+    container_name: aihf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aihf
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: aihf
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - aihf-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aihf -d aihf"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - default
 
 volumes:
   aihf-data:
+  aihf-pgdata:
 
 networks:
   agentlab-public:
