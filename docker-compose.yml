@@ -29,7 +29,7 @@ services:
         condition: service_healthy
 
   aihf-postgres:
-    image: pgvector/pg:pg16
+    image: pgvector/pgvector:pg16
     container_name: aihf-postgres
     restart: unless-stopped
     environment:
