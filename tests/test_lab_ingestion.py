@@ -8,7 +8,9 @@ from polyagents.dataflows.news import NewsItem
 from polyagents.ingestion import (
     HistoricalCollectionsIngestor,
     build_historical_collection,
+    build_historical_collections,
     parse_settled_binary_market,
+    parse_settled_outcome_markets,
 )
 from polyagents.ingestion.replay_builder import select_prediction_window
 from polyagents.lab.backtest import BacktestRunner
@@ -110,6 +112,23 @@ def test_parse_resolved_binary_market_rejects_non_binary():
     assert reason == "skipped_non_binary"
 
 
+def test_parse_settled_outcome_markets_expands_polymarket_tokens():
+    markets, reason = parse_settled_outcome_markets(
+        _raw_market(
+            outcomes='["100-119","120-139","140+"]',
+            clobTokenIds='["tok-a","tok-b","tok-c"]',
+            outcomePrices='["0","1","0"]',
+        )
+    )
+
+    assert reason is None
+    assert [m.yes_token_id for m in markets] == ["tok-a", "tok-b", "tok-c"]
+    assert [m.outcome for m in markets] == [0, 1, 0]
+    assert markets[1].outcome_label == "120-139"
+    assert markets[1].question.endswith("[120-139]")
+    assert markets[1].raw["lab_news_query"] == "Will bitcoin close above 100k?"
+
+
 def test_prediction_time_uses_midpoint_before_resolution():
     selected = select_prediction_window(
         _candles(10),
@@ -124,6 +143,20 @@ def test_prediction_time_uses_midpoint_before_resolution():
     assert market_price == pit[-1].close
 
 
+def test_prediction_policy_multi_generates_multiple_pit_windows():
+    market, _ = parse_settled_binary_market(_raw_market())
+    collections, reason = build_historical_collections(market, _candles(10), min_history=4)
+
+    assert reason is None
+    assert [c["as_of"] for c in collections] == [
+        "2026-01-01T04:00:00Z",
+        "2026-01-01T05:00:00Z",
+        "2026-01-01T07:00:00Z",
+    ]
+    assert {c["raw"]["lab"]["prediction_policy"] for c in collections} == {"multi"}
+    assert [c["raw"]["lab"]["prediction_fraction"] for c in collections] == [0.25, 0.5, 0.75]
+
+
 def test_collection_generation_shape_and_pit_metadata():
     market, _ = parse_settled_binary_market(_raw_market())
     collection, reason = build_historical_collection(market, _candles(10), min_history=4)
@@ -134,6 +167,9 @@ def test_collection_generation_shape_and_pit_metadata():
     assert raw["lab"]["outcome"] == 1
     assert raw["lab"]["prediction_policy"] == "midpoint"
     assert raw["lab"]["available_at_max"] < collection["as_of"]
+    assert raw["market"]["polymarket_price_source"] == "clob_prices_history"
+    assert raw["market"]["polymarket_outcome_source"] == "gamma_outcomePrices"
+    assert raw["market"]["yes_token_id"] == "yes-token"
     assert "price_momentum" in raw["features"]["factors"]
     assert raw["orderbook"]["book_pressure"] == 0.0
 
@@ -273,9 +309,9 @@ def test_ingestion_inserts_and_deduplicates_collections(tmp_path):
     first = ingestor.run(limit=10)
     second = ingestor.run(limit=10)
 
-    assert first.inserted == 1
-    assert second.duplicates == 1
-    assert store.counts()["collections"] == 1
+    assert first.inserted == 3
+    assert second.duplicates == 3
+    assert store.counts()["collections"] == 3
     assert store.counts()["trades"] == 1
     assert store.collection_exists("yes-token", "2026-01-01T05:00:00Z")
     store.close()
@@ -301,9 +337,11 @@ def test_ingestion_stats_include_historical_news_counts(tmp_path):
 
     stats = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
 
-    assert stats.inserted == 1
-    assert stats.news_items_used == 1
-    assert stats.news_items_skipped_future == 1
+    assert stats.inserted == 3
+    assert stats.news_items_used == 3
+    assert stats.news_items_skipped_future == 3
+    assert stats.news_cache_misses == 1
+    assert stats.news_cache_hits == 2
     store.close()
 
 
@@ -321,15 +359,15 @@ def test_ingestion_refreshes_duplicate_collections_with_news(tmp_path):
         ),
     ])
     second = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
-    [collection] = store.fetch_collections()
+    collections = store.fetch_collections()
 
-    assert first.inserted == 1
-    assert second.duplicates == 1
-    assert second.updated_duplicates == 1
+    assert first.inserted == 3
+    assert second.duplicates == 3
+    assert second.updated_duplicates == 3
     assert second.inserted == 0
-    assert collection["raw"]["news"]["n_items"] == 1
-    assert collection["raw"]["features"]["factors"]["sentiment"] > 0
-    assert store.counts()["collections"] == 1
+    assert all(collection["raw"]["news"]["n_items"] == 1 for collection in collections)
+    assert all(collection["raw"]["features"]["factors"]["sentiment"] > 0 for collection in collections)
+    assert store.counts()["collections"] == 3
     store.close()
 
 
@@ -337,7 +375,7 @@ def test_ingestion_stats_count_skips(tmp_path):
     store = DataStore(tmp_path / "data.db")
     client = _FakeClient(
         [
-            _raw_market(outcomes='["A","B","C"]'),
+            _raw_market(outcomes='["A","B","C"]', clobTokenIds='["a","b"]'),
             _raw_market(id="m2", conditionId="cond2", clobTokenIds='["yes2","no2"]'),
         ],
         {"yes2": []},
@@ -348,6 +386,70 @@ def test_ingestion_stats_count_skips(tmp_path):
     assert stats.skipped_non_binary == 1
     assert stats.skipped_no_price_history == 1
     assert stats.inserted == 0
+    store.close()
+
+
+def test_ingestion_expands_multi_outcome_markets(tmp_path):
+    store = DataStore(tmp_path / "data.db")
+    client = _FakeClient(
+        [
+            _raw_market(
+                outcomes='["100-119","120-139","140+"]',
+                clobTokenIds='["tok-a","tok-b","tok-c"]',
+                outcomePrices='["0","1","0"]',
+            )
+        ],
+        {
+            "tok-a": _candles(10, price=0.20),
+            "tok-b": _candles(10, price=0.40),
+            "tok-c": _candles(10, price=0.10),
+        },
+    )
+
+    stats = HistoricalCollectionsIngestor(client=client, store=store).run(limit=10)
+    rows = store.fetch_collections()
+
+    assert stats.inserted == 9
+    assert stats.skipped_non_binary == 0
+    assert store.counts()["collections"] == 9
+    assert {r["token_id"] for r in rows} == {"tok-a", "tok-b", "tok-c"}
+    assert {r["raw"]["market"]["outcome_label"] for r in rows} == {"100-119", "120-139", "140+"}
+    store.close()
+
+
+def test_ingestion_reuses_news_search_for_multi_outcome_markets(tmp_path):
+    store = DataStore(tmp_path / "data.db")
+    client = _FakeClient(
+        [
+            _raw_market(
+                outcomes='["100-119","120-139","140+"]',
+                clobTokenIds='["tok-a","tok-b","tok-c"]',
+                outcomePrices='["0","1","0"]',
+            )
+        ],
+        {
+            "tok-a": _candles(10, price=0.20),
+            "tok-b": _candles(10, price=0.40),
+            "tok-c": _candles(10, price=0.10),
+        },
+    )
+    news = _FakeNewsClient([
+        NewsItem(
+            title="Bitcoin range market update",
+            url="https://example.com/range",
+            snippet="bullish",
+            published="2026-01-01T03:00:00Z",
+        ),
+    ])
+
+    stats = HistoricalCollectionsIngestor(client=client, store=store, news_client=news).run(limit=10)
+
+    assert stats.inserted == 9
+    assert stats.news_cache_misses == 1
+    assert stats.news_cache_hits == 8
+    assert len(news.calls) == 1
+    assert news.calls[0]["query"] == "Will bitcoin close above 100k?"
+    assert stats.news_items_used == 9
     store.close()
 
 
@@ -373,8 +475,8 @@ def test_backtest_runner_consumes_ingested_collections(tmp_path):
     )
 
     report = repo.get_report(result.report_id)
-    assert stats.inserted == 1
-    assert result.forecast_count == 1
+    assert stats.inserted == 3
+    assert result.forecast_count == 3
     assert report["market_universe"]["source"] == "collections"
     assert report["data_quality"]["uses_fixture_data"] is False
     assert report["market_sample"][0]["snapshot_manifest"]["pit_status"] == "clean"

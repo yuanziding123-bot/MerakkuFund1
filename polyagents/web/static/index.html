@@ -1650,7 +1650,7 @@ async function runLabIngestion(){
     const limit=+(document.getElementById('labIngestLimit').value||100);
     const r=await labFetchJson('/api/lab/data/ingest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
     const s=r.stats||{};
-    out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nupdated_duplicates: ${s.updated_duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}\nnews_items_used: ${s.news_items_used??0}\nnews_items_skipped_no_published: ${s.news_items_skipped_no_published??0}\nnews_items_skipped_future: ${s.news_items_skipped_future??0}</pre>`;
+    out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nupdated_duplicates: ${s.updated_duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}\nnews_items_used: ${s.news_items_used??0}\nnews_items_skipped_no_published: ${s.news_items_skipped_no_published??0}\nnews_items_skipped_future: ${s.news_items_skipped_future??0}\nnews_cache_hits: ${s.news_cache_hits??0}\nnews_cache_misses: ${s.news_cache_misses??0}</pre>`;
     await loadLabDataStatus();
   }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
   finally{ btn.disabled=false; btn.textContent='▶ Run ingestion'; }
@@ -1757,7 +1757,14 @@ function renderLabReport(rep){
     `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
   const sample=(rep.market_sample||[]).slice(0,5).map(x=>{
     const ne=x.news_evidence||{};
+    const ee=x.edge_evidence||{};
+    const align=ee.polymarket_alignment||{};
     const first=(ne.items&&ne.items[0])||null;
+    const researchEdge = Number(ee.research_edge ?? (Number(x.p_cal||0)-Number(x.p_market||0)));
+    const execText = ee.executable_edge_available
+      ? `exec_edge=${Number(ee.executable_edge||0).toFixed(3)}`
+      : 'exec_edge=unavailable';
+    const edgeLine = `\n  edge: research=${researchEdge.toFixed(3)} · ${execText} · ${ee.edge_type||'research_probability_gap'} · price_source=${align.price_source||'unknown'} · outcome_source=${align.outcome_source||'unknown'} · token_match=${align.token_id_match!==false}`;
     let newsLine = '';
     if(ne.source){
       const source = ne.source === 'unavailable' || ne.source === 'unknown'
@@ -1767,7 +1774,7 @@ function renderLabReport(rep){
     }else{
       newsLine = '\n  news: not recorded in this report · rerun ingestion/backtest to populate PIT news evidence';
     }
-    return `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}${newsLine}`;
+    return `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}${edgeLine}${newsLine}`;
   }).join('\n');
   const target=document.getElementById('labReportReview') || document.getElementById('btResult');
   target.innerHTML=
