@@ -23,7 +23,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
                            plot_market_capability, relational_alpha_capability,
-                           research_alpha_capability,
+                           research_alpha_capability, scan_conditional_arb_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            scan_opportunities_capability, strategy_capability)
@@ -334,10 +334,12 @@ def default_registry() -> list:
     # ones, so its probability must be ≤ theirs (win ⊆ reach final ⊆ reach semi ⊆ advance).
     _STAGE_KW = [
         (("win the", "wins the", "champion", "to win", "winner of"), 4),
-        (("reach the final", "make the final", "in the final", "the final"), 3),
+        (("reach the final", "make the final", "in the final", "the final", "final"), 3),
         (("semifinal", "semi-final", "semi final"), 2),
         (("quarterfinal", "quarter-final", "quarter final"), 1),
-        (("advance", "group stage", "qualify", "round of", "knockout"), 0),
+        # advance-this-round / single-match: the weakest (nearest) claim in the chain
+        (("advance", "group stage", "qualify", "round of", "knockout",
+          "beat", "defeat", " vs ", " vs.", "to advance"), 0),
     ]
 
     def _stage_level(q):
@@ -598,6 +600,55 @@ def default_registry() -> list:
             review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
         return {"query": query, "synth": synth, "backtest": bt, "relational": rel,
                 "news_signal": news_sig, "review": review}
+
+    # ----- pack: conditional-arb (cross-market conditional / implication arb scanner) --
+
+    def scan_conditional_arb(query=None, max_show=10):
+        """Scan the market for CONDITIONAL cross-market structures: an entity with a
+        championship market linked to lower-stage (reach-final / advance / single-match)
+        markets. Report the implied P(champ|advance)=P(champ)/P(advance), flag GENUINE
+        logical-implication arbitrage (a stronger claim priced above a weaker one — that
+        is risk-free & bounded), and separate it from directional conditional value."""
+        rows = mcp_server.scan_markets(limit=500, min_volume_24h=0.0)   # wide net: stage markets rank lower
+        ents: dict = {}
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", ""))
+            m = re.match(r"will\s+(.+?)\s+(win|reach|advance|make|beat|defeat|qualify|to win|to advance)",
+                         q.lower())
+            if not m:
+                continue
+            ent, lvl = m.group(1).strip(), _stage_level(q)
+            if lvl is None or len(ent) < 2:
+                continue
+            ents.setdefault(ent, []).append({"question": q, "price": round(float(r.get("price") or 0), 4),
+                                              "level": lvl})
+        chains = []
+        for ent, mk in ents.items():
+            staged, seen = [], set()
+            for c in sorted(mk, key=lambda c: -c["level"]):          # keep one market per stage level
+                if c["level"] not in seen:
+                    seen.add(c["level"]); staged.append(c)
+            if len({c["level"] for c in staged}) < 2:                # need ≥2 stages for a conditional
+                continue
+            violations = []                                          # genuine implication arb (risk-free)
+            for i in range(len(staged) - 1):
+                hi, lo = staged[i], staged[i + 1]
+                if hi["price"] > lo["price"] + 0.01:
+                    violations.append({"stronger": hi["question"], "p_strong": hi["price"],
+                                       "weaker": lo["question"], "p_weak": lo["price"],
+                                       "gap": round(hi["price"] - lo["price"], 4)})
+            champ, nxt = staged[0], staged[1]
+            cond = round(champ["price"] / nxt["price"], 4) if nxt["price"] > 0 else None
+            chains.append({"entity": ent, "chain": staged, "violations": violations,
+                           "champ_q": champ["question"], "p_champ": champ["price"],
+                           "advance_q": nxt["question"], "p_advance": nxt["price"],
+                           "cond_champ_given_advance": cond, "has_arb": bool(violations)})
+        chains.sort(key=lambda c: (c["has_arb"], max((v["gap"] for v in c["violations"]), default=0.0)),
+                    reverse=True)
+        return {"query": query, "n_entities": len(ents), "n_chains": len(chains),
+                "n_true_arb": sum(1 for c in chains if c["has_arb"]), "chains": chains[:max_show]}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
@@ -1129,6 +1180,7 @@ def default_registry() -> list:
         plot_market_capability(plot_market),
         relational_alpha_capability(relational_alpha),
         research_alpha_capability(research_alpha),
+        scan_conditional_arb_capability(scan_conditional_arb),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),

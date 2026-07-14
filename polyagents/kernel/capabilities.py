@@ -305,6 +305,24 @@ def research_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
 
 
+def scan_conditional_arb_capability(fn: Callable) -> Capability:
+    """Cross-market conditional / implication arbitrage scanner (pack: conditional-arb).
+    ``fn(query) -> dict`` sweeps the market for entities whose championship market links to
+    lower-stage (reach-final / advance / single-match) markets, computes the implied
+    conditional P(champ|advance), and flags GENUINE logical-implication arbitrage (a
+    stronger claim priced above a weaker one — risk-free, bounded), kept separate from
+    directional conditional value. Computed, honest about what is truly risk-free."""
+    def run(ctx: Context) -> dict:
+        return {"conditional_arb": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("scan_conditional_arb",
+                      "Scan for cross-market CONDITIONAL / logical-implication arbitrage: link an "
+                      "entity's championship market to its advance-this-round / reach-final / match "
+                      "markets, report P(champ|advance), and flag risk-free implication violations "
+                      "(stronger claim priced above weaker). Use for '找条件概率/跨市场/晋级-夺冠套利', "
+                      "'scan for conditional arbitrage', 'where is champ priced above advancing'.",
+                      frozenset({"question"}), frozenset({"conditional_arb"}), run, cost=5)
+
+
 def plot_market_capability(fn: Callable) -> Capability:
     """Visualize market data as a chart (core, always-on).
 

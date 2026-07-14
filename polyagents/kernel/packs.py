@@ -42,6 +42,13 @@ PACKS: dict[str, dict] = {
         "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
         "capabilities": ["news_sentiment"],
     },
+    "conditional-arb": {
+        "name": "跨市场条件套利扫描",
+        "description": "扫全市场找'冠军 × 晋级/单场'的条件概率关联链:算 P(夺冠|晋级)=P(夺冠)/P(晋级),"
+                       "标出**真·逻辑蕴含套利**(强命题反而更贵=无风险),并把它与'条件概率方向性价值'分开。"
+                       "注:P(单场)×P(夺冠) 那种链式成本不是有效套利,本 skill 只报真的。",
+        "capabilities": ["scan_conditional_arb"],
+    },
     "alpha-research": {
         "name": "关联 alpha 研究(策略验证 + 改进)",
         "description": "针对一个标的验证你的策略/假设有没有 alpha,并给改进意见。核心是事件关联性:"

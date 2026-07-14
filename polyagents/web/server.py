@@ -1057,6 +1057,41 @@ def _format_alpha_review(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_conditional_arb(a: dict, path: str) -> str:
+    """Render the cross-market conditional/implication arbitrage scan."""
+    chains = a.get("chains") or []
+    lines = [f"**跨市场条件套利扫描 · scan_conditional_arb** · {path}", "",
+             f"_扫了 {a.get('n_entities')} 个实体,{a.get('n_chains')} 条条件链,"
+             f"**真·逻辑蕴含套利 {a.get('n_true_arb')} 个**_"]
+    if not chains:
+        lines.append("\n未找到可组成条件链的关联标的(需同一实体既有'夺冠'又有'进决赛/晋级/单场'市场;"
+                     "当前多数标的只挂了夺冠盘)。")
+        return "\n".join(lines)
+    arbs = [c for c in chains if c.get("has_arb")]
+    if arbs:
+        lines.append("\n🟢 **真·无风险套利(强命题反而更贵,买弱腿/卖强腿):**")
+        for c in arbs:
+            for v in c["violations"]:
+                lines.append(f"- **{(v.get('stronger') or '')[:34]}**({v.get('p_strong')}) > "
+                             f"{(v.get('weaker') or '')[:34]}({v.get('p_weak')}) · gap **{v.get('gap'):+}**")
+    lines.append("\n**条件概率分解**(P(夺冠|晋级) = P(夺冠) / P(晋级)):")
+    lines.append("\n| 实体 | P(夺冠) | P(晋级/进决赛) | **P(夺冠\\|晋级)** | 蕴含一致 |")
+    lines.append("|---|---|---|---|---|")
+    for c in chains:
+        ok = "✅" if not c.get("has_arb") else "❌ 套利"
+        lines.append(f"| {c.get('entity')} | {c.get('p_champ')} | {c.get('p_advance')} | "
+                     f"**{c.get('cond_champ_given_advance')}** | {ok} |")
+    conds = [c.get("cond_champ_given_advance") for c in chains
+             if isinstance(c.get("cond_champ_given_advance"), (int, float))]
+    if len(conds) >= 3:
+        mid = sorted(conds)[len(conds) // 2]
+        lines.append(f"\n　同档 P(夺冠|晋级) 中位数≈{mid:.3f};显著高于中位=该队'晋级后夺冠'被高估(方向性做空候选),"
+                     f"反之偏低=被低估。**这是方向性价值,非无风险。**")
+    lines.append("\n_真·套利只在**强命题定价高于弱命题**时出现(有界、近无风险,仍需扣手续费/滑点/流动性)。"
+                 "P(单场)×P(夺冠) 那种'链式成本'不是有效套利——条件概率是推导值,市场没单独挂牌,不可执行。_")
+    return "\n".join(lines)
+
+
 def _format_backfill(a: dict, path: str) -> str:
     """Render the outcome-backfill: how many stored snapshots got labelled."""
     if a.get("error"):
@@ -1302,6 +1337,8 @@ def _kernel_summary(ctx) -> str:
     # controller may have also run as an intermediate step.
     if "alpha_review" in f:                              # strategy validation + improvement
         return _format_alpha_review(f["alpha_review"], path)
+    if "conditional_arb" in f:                           # cross-market conditional/implication arb scan
+        return _format_conditional_arb(f["conditional_arb"], path)
     if "relational_alpha" in f:                          # event-relatedness engine
         return _format_relational(f["relational_alpha"], path)
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
