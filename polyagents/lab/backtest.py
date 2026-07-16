@@ -201,6 +201,11 @@ class BacktestRunner:
             min_samples=30,
             pit_clean=not diagnostics["pit_warnings"],
         )
+        sample_structure = self._sample_structure(market_sample)
+        diagnostics["data_quality"]["condition_cluster_count"] = sample_structure["condition_cluster_count"]
+        diagnostics["data_quality"]["cluster_adjusted_sample_adequate"] = sample_structure[
+            "cluster_adjusted_sample_adequate"
+        ]
         report_id = f"eval_{_short_hash(run_id + request.hypothesis_id)}"
         report = {
             "id": report_id,
@@ -227,6 +232,7 @@ class BacktestRunner:
             },
             "market_universe": diagnostics["market_universe"],
             "data_quality": diagnostics["data_quality"],
+            "sample_structure": sample_structure,
             "metrics": asdict(summary),
             "scorecard": scorecard(p_cal=p_cal, p_market=p_market, outcomes=outcomes),
             "gates": promotion_gates(summary),
@@ -502,6 +508,35 @@ class BacktestRunner:
                 for i in items[:3]
                 if isinstance(i, dict)
             ],
+        }
+
+    @staticmethod
+    def _sample_structure(market_sample: list[dict]) -> dict:
+        tokens: set[str] = set()
+        clusters: set[str] = set()
+        snapshots_by_cluster: dict[str, int] = {}
+        for row in market_sample:
+            token = str(row.get("market_token_id") or "")
+            if token:
+                tokens.add(token)
+            align = ((row.get("edge_evidence") or {}).get("polymarket_alignment") or {})
+            condition = str(align.get("condition_id") or token or "")
+            if condition:
+                clusters.add(condition)
+                snapshots_by_cluster[condition] = snapshots_by_cluster.get(condition, 0) + 1
+        sample_count = len(market_sample)
+        cluster_count = len(clusters)
+        max_snapshots = max(snapshots_by_cluster.values(), default=0)
+        return {
+            "sample_count": sample_count,
+            "token_count": len(tokens),
+            "condition_cluster_count": cluster_count,
+            "max_snapshots_per_cluster": max_snapshots,
+            "cluster_adjusted_sample_adequate": cluster_count >= 30,
+            "note": (
+                "Multi-snapshot samples from the same condition_id are not fully independent; "
+                "use condition_cluster_count for statistical confidence."
+            ),
         }
 
     @staticmethod

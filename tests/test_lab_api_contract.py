@@ -15,6 +15,8 @@ def test_lab_routes_are_registered():
     assert "/api/lab/hypotheses/{id}" in paths
     assert "/api/lab/data/status" in paths
     assert "/api/lab/data/ingest" in paths
+    assert "/api/lab/data/ingest-jobs" in paths
+    assert "/api/lab/data/ingest-jobs/{job_id}" in paths
     assert "/api/lab/hypotheses/{id}/backtests" in paths
     assert "/api/lab/backtests/{id}" in paths
     assert "/api/lab/reports/{id}" in paths
@@ -177,3 +179,29 @@ def test_lab_http_data_status_and_ingest_contract(tmp_path, monkeypatch):
     ingest = client.post("/api/lab/data/ingest", json={"limit": 2})
     assert ingest.status_code == 200
     assert ingest.json()["stats"]["inserted"] == 1
+
+    job = client.post("/api/lab/data/ingest-jobs", json={"limit": 2})
+    assert job.status_code == 200
+    job_id = job.json()["id"]
+    assert job.json()["status"] in {"queued", "running", "completed"}
+
+    job_status = client.get(f"/api/lab/data/ingest-jobs/{job_id}")
+    assert job_status.status_code == 200
+    assert job_status.json()["id"] == job_id
+
+
+def test_lab_system_status_reports_readiness(monkeypatch):
+    import polyagents.web.server as server
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setitem(server.DEFAULT_CONFIG, "execution_mode", "paper")
+    monkeypatch.setitem(server.DEFAULT_CONFIG, "tavily_api_key", "test-key")
+    client = TestClient(server.app)
+
+    response = client.get("/api/lab/system/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "database" in body
+    assert "readiness" in body
+    assert body["live_tools_enabled"] is False

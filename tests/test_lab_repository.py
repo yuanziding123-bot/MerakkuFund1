@@ -137,6 +137,10 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     assert forecasts[0]["p_cal"] != forecasts[0]["p_market"]
     report = repo.get_report(result.report_id)
     assert report["metrics"]["n"] == 2
+    assert report["sample_structure"]["sample_count"] == 2
+    assert report["sample_structure"]["token_count"] == 2
+    assert report["sample_structure"]["condition_cluster_count"] == 2
+    assert report["data_quality"]["cluster_adjusted_sample_adequate"] is False
     assert report["market_universe"]["source"] == "collections"
     assert report["market_universe"]["eligible_markets"] == 2
     assert report["data_quality"]["pit_clean"] is True

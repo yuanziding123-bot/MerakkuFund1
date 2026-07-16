@@ -34,9 +34,11 @@ from polyagents.default_config import DEFAULT_CONFIG
 from polyagents.ingestion.polymarket_ingest import run_polymarket_ingestion
 from polyagents.lab.backtest import BacktestRunner, get_backtest_run, get_report
 from polyagents.lab.monitor import LabMonitor, MonitorRequest
-from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
+from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest, utc_now
 from polyagents.lab.service import create_hypothesis, default_repository, get_hypothesis, list_hypotheses
+from polyagents.storage.audit_store import AuditStore
 from polyagents.storage.db import DataStore
+from polyagents.storage.engine import database_url
 
 from polyagents.runtime.session import AgentSession
 
@@ -65,6 +67,19 @@ _STATIC = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="polyagents chat")
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+_LAB_INGEST_JOBS: dict[str, dict] = {}
+
+
+def _audit_lab(event_type: str, payload: dict | None = None) -> None:
+    try:
+        store = AuditStore()
+        try:
+            store.log("lab-api", event_type, payload or {}, mode="lab")
+        finally:
+            store.close()
+    except Exception:
+        pass
 
 
 def _qlib_python() -> str:
@@ -291,11 +306,59 @@ async def lab_data_ingest(request: Request) -> JSONResponse:
         return JSONResponse({"error": {"code": "ingestion_failed", "message": str(exc)}}, status_code=400)
 
 
+def _run_lab_ingestion_job(job_id: str, *, limit: int) -> None:
+    job = _LAB_INGEST_JOBS[job_id]
+    job.update({"status": "running", "started_at": utc_now()})
+    try:
+        stats = run_polymarket_ingestion(limit=limit, db_path=DEFAULT_CONFIG["db_path"])
+        job.update({"status": "completed", "finished_at": utc_now(), "stats": asdict(stats)})
+        _audit_lab("lab.ingestion_job.completed", {"job_id": job_id, "stats": asdict(stats)})
+    except Exception as exc:
+        job.update({"status": "failed", "finished_at": utc_now(), "error": str(exc)})
+        _audit_lab("lab.ingestion_job.failed", {"job_id": job_id, "error": str(exc)})
+
+
+@app.post("/api/lab/data/ingest-jobs")
+async def lab_data_ingest_job(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        limit = int(payload.get("limit", 100))
+        job_id = f"ing_{uuid.uuid4().hex[:10]}"
+        _LAB_INGEST_JOBS[job_id] = {
+            "id": job_id,
+            "type": "lab_ingestion_job",
+            "status": "queued",
+            "limit": limit,
+            "created_at": utc_now(),
+            "started_at": None,
+            "finished_at": None,
+            "stats": None,
+            "error": None,
+        }
+        _audit_lab("lab.ingestion_job.create", {"job_id": job_id, "limit": limit})
+        asyncio.create_task(asyncio.to_thread(_run_lab_ingestion_job, job_id, limit=limit))
+        return JSONResponse(_LAB_INGEST_JOBS[job_id])
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "ingestion_job_failed", "message": str(exc)}}, status_code=400)
+
+
+@app.get("/api/lab/data/ingest-jobs/{job_id}")
+async def lab_data_ingest_job_status(job_id: str) -> JSONResponse:
+    job = _LAB_INGEST_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse({"error": {"code": "not_found", "message": f"ingestion job not found: {job_id}"}}, status_code=404)
+    return JSONResponse(job)
+
+
 def _run_lab_backtest_sync(id: str, payload: dict) -> dict:
     store = DataStore(DEFAULT_CONFIG["db_path"])
     try:
         body = {**payload, "hypothesis_id": id}
         result = BacktestRunner(store=store).run(BacktestRequest(**body))
+        _audit_lab(
+            "lab.backtest.completed",
+            {"hypothesis_id": id, "run_id": result.id, "report_id": result.report_id, "strategy_id": payload.get("strategy_id")},
+        )
         return {
             "backtest_run_id": result.id,
             "status": result.status,
@@ -342,11 +405,36 @@ async def lab_report(id: str) -> JSONResponse:
 
 @app.get("/api/lab/system/status")
 async def lab_system_status() -> JSONResponse:
+    db_url = database_url()
+    db_backend = "postgres" if db_url.startswith(("postgresql://", "postgresql+")) else "sqlite"
+    live_enabled = str(DEFAULT_CONFIG.get("execution_mode") or "").lower() == "live"
+    tavily_configured = bool(DEFAULT_CONFIG.get("tavily_api_key"))
+    issues = []
+    if db_backend != "postgres":
+        issues.append("production DB is not Postgres; local SQLite is suitable for dev/demo only")
+    if live_enabled:
+        issues.append("Live execution mode is enabled; keep disabled until Lab gates and operator approvals are enforced")
+    if not tavily_configured:
+        issues.append("TAVILY_API_KEY is missing; historical news evidence will be unavailable")
     return JSONResponse({
         "tool_manifest_hash": "tm_lab_v1",
         "permission_policy": "lab-v1",
-        "data_sources": [{"id": "polymarket", "status": "unknown", "last_checked_at": None}],
-        "live_tools_enabled": False,
+        "data_sources": [
+            {"id": "polymarket", "status": "configured", "last_checked_at": None},
+            {"id": "tavily", "status": "configured" if tavily_configured else "missing_key", "last_checked_at": None},
+        ],
+        "database": {
+            "backend": db_backend,
+            "production_ready": db_backend == "postgres",
+            "url_present": bool(db_url),
+            "data_store_path": DEFAULT_CONFIG["db_path"],
+        },
+        "live_tools_enabled": live_enabled,
+        "audit_enabled": True,
+        "readiness": {
+            "production_ready": not issues,
+            "issues": issues,
+        },
     })
 
 

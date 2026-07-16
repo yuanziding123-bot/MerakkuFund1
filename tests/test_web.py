@@ -86,6 +86,9 @@ def test_lab_ui_uses_lab_api_contract():
     assert "Reports · EvaluationReport ledger" in html
     assert "Historical replay · resolved price history" in html
     assert "qlib factor backtest · experimental" in html
+    assert "Launch readiness · system checks" in html
+    assert "function loadLabSystemStatus" in html
+    assert "labFetchJson('/api/lab/system/status')" in html
     assert "点击任一 report 查看完整 EvaluationReport review" in html
     assert "Open Backtest workflow" in html
     assert "auto-detected during backtest" in html
@@ -108,13 +111,18 @@ def test_lab_ui_uses_lab_api_contract():
     ):
         assert strategy_id in html
     assert "labFetchJson('/api/lab/data/status')" in html
-    assert "labFetchJson('/api/lab/data/ingest'" in html
+    assert "labFetchJson('/api/lab/data/ingest-jobs'" in html
+    assert "'/api/lab/data/ingest-jobs/'+encodeURIComponent(job.id)" in html
     assert "news_items_skipped_future" in html
     assert "skipped_undated" in html
     assert "news_evidence" in html
+    assert "sample_structure" in html
+    assert "condition clusters" in html
+    assert "Review order: source" in html
     assert "rerun ingestion/backtest to populate PIT news evidence" in html
     assert "labFetchJson('/api/lab/monitor/opportunities'" in html
     assert "dry_run=true" in html
+    assert "No opportunity means the selected strategy" in html
     assert "function labFetchJson" in html
     assert "labFetchJson('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html
