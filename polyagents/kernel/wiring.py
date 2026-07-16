@@ -23,6 +23,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
                            log_prediction_capability, market_radar_capability,
+                           news_to_markets_capability,
                            plot_market_capability, prediction_journal_capability,
                            relational_alpha_capability,
                            research_alpha_capability, scan_conditional_arb_capability,
@@ -980,6 +981,51 @@ def default_registry() -> list:
         return {"query": query, "enabled": True, "n_items": len(scored),
                 "mean_sentiment": mean, "signal": signal, "items": scored}
 
+    def news_to_markets(query, top=8):
+        """Reverse of news_sentiment: given a NEWS item, find which live Polymarket markets
+        it affects and the likely direction. LLM entity-links the news → candidate markets
+        (deterministic overlap) → LLM rates each market's direction. Event-driven scouting."""
+        term_words = set()
+        for t in _topic_terms(query):                       # LLM entities/keywords from the news
+            term_words |= _words(t)
+        rows = mcp_server.scan_markets(limit=120, min_volume_24h=0.0)
+        scored, seen = [], set()
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            cid = r.get("condition_id")
+            hits = len(term_words & _words(r.get("question", "")))
+            if hits <= 0 or cid in seen:
+                continue
+            seen.add(cid)
+            scored.append({"question": r.get("question"), "price": round(float(r.get("price") or 0), 4),
+                           "hits": hits})
+        scored.sort(key=lambda s: -s["hits"])
+        candidates = scored[:top]
+        if not candidates:
+            return {"query": query, "terms": sorted(term_words)[:10], "candidates": [],
+                    "note": "没找到明显相关的活跃市场(新闻里的实体没匹配到标的)。"}
+        analysis = None                                     # LLM direction per candidate (grounded)
+        try:
+            import json as _json
+            cand = _json.dumps([{"q": c["question"], "price": c["price"]} for c in candidates],
+                               ensure_ascii=False)
+            sys = ("You map a NEWS item to the prediction markets it affects. Given the news and a "
+                   "list of CANDIDATE markets (with current YES price), for each RELEVANT one give "
+                   "the likely direction for YES — 📈 利好(涨) / 📉 利空(跌) / ❓不确定 — and a one-line "
+                   "why tying the news to that market. Skip clearly irrelevant candidates. Use ONLY "
+                   "the given markets; never invent markets or prices. These are hypotheses to verify, "
+                   "not certainties. Answer in the user's language, concise bullets, <190 words.")
+            resp = eng._get_llm().invoke([("system", sys), ("user", f"News:\n{query}\n\nCandidates:\n{cand}")])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            analysis = str(text).strip()
+        except Exception as exc:
+            analysis = f"(方向分析失败:{type(exc).__name__};以下为匹配到的候选市场。)"
+        return {"query": query, "terms": sorted(term_words)[:10],
+                "candidates": candidates, "analysis": analysis}
+
     def microstructure_scan(query, n=10):
         cat = categorize(query or "")
         rows = mcp_server.scan_markets(limit=30, min_volume_24h=10000.0)
@@ -1394,6 +1440,7 @@ def default_registry() -> list:
         paper_trade_capability(paper_trade),
         settle_and_reflect_capability(settle_and_reflect),
         news_sentiment_capability(news_sentiment),
+        news_to_markets_capability(news_to_markets),
         microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),

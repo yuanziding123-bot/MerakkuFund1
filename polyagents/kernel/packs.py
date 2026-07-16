@@ -38,9 +38,10 @@ PACKS: dict[str, dict] = {
         "capabilities": ["microstructure_scan"],
     },
     "news-events": {
-        "name": "新闻 / 事件情绪",
-        "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
-        "capabilities": ["news_sentiment"],
+        "name": "新闻 / 事件(双向)",
+        "description": "两向:①某市场/主题 → 拉新闻打情绪分(news_sentiment,需 TAVILY);②一条新闻/事件 → "
+                       "反查它影响哪些活跃标的 + 方向(news_to_markets,事件驱动主观交易利器)。",
+        "capabilities": ["news_sentiment", "news_to_markets"],
     },
     "prediction-journal": {
         "name": "个人预测日志(校准你的直觉)",

@@ -1064,6 +1064,30 @@ def _format_alpha_review(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_news_markets(a: dict, path: str) -> str:
+    """Render news → affected markets: LLM direction analysis + the matched candidates."""
+    lines = [f"**新闻→标的映射 · news_to_markets** · {path}", "",
+             f"_新闻:{(a.get('query') or '')[:80]}_"]
+    if a.get("note") and not a.get("candidates"):
+        lines.append(f"\n{a['note']}")
+        if a.get("terms"):
+            lines.append(f"\n_抽取到的实体/关键词:{', '.join(a['terms'])}_")
+        return "\n".join(lines)
+    if a.get("analysis"):
+        lines.append("\n**📰 方向研判(利好/利空,值得验证)**\n")
+        lines.append(a["analysis"])
+    cands = a.get("candidates") or []
+    if cands:
+        lines.append("\n**匹配到的活跃标的**")
+        lines.append("\n| 市场 | 现价 | 关联度 |")
+        lines.append("|---|---|---|")
+        for c in cands:
+            lines.append(f"| {(c.get('question') or '')[:40]} | {c.get('price')} | {c.get('hits')} |")
+    lines.append("\n_LLM 把新闻实体链接到活跃标的并研判方向,**是待验证假设**,非确定。想深挖某个 → analyze_market;"
+                 "想记下你的判断 → log_prediction。_")
+    return "\n".join(lines)
+
+
 def _format_prediction_logged(a: dict, path: str) -> str:
     if a.get("error"):
         return f"**预测记录 · log_prediction** · {path}\n\n{a['error']}"
@@ -1437,6 +1461,8 @@ def _kernel_summary(ctx) -> str:
     # controller may have also run as an intermediate step.
     if "alpha_review" in f:                              # strategy validation + improvement
         return _format_alpha_review(f["alpha_review"], path)
+    if "news_markets" in f:                              # news → affected markets + direction
+        return _format_news_markets(f["news_markets"], path)
     if "prediction_logged" in f:                         # user's own subjective call recorded
         return _format_prediction_logged(f["prediction_logged"], path)
     if "prediction_journal" in f:                        # journal + personal calibration

@@ -17,7 +17,7 @@ class FakeLLM:
 
 
 def test_new_packs_registered_and_selectable():
-    assert PACKS["news-events"]["capabilities"] == ["news_sentiment"]
+    assert PACKS["news-events"]["capabilities"] == ["news_sentiment", "news_to_markets"]
     assert PACKS["microstructure"]["capabilities"] == ["microstructure_scan"]
     names = kernel_capability_names(["microstructure"])
     assert "microstructure_scan" in names and "news_sentiment" not in names   # only selected pack

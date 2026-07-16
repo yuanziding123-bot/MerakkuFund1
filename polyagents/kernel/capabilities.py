@@ -305,6 +305,20 @@ def research_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
 
 
+def news_to_markets_capability(fn: Callable) -> Capability:
+    """News → affected markets (pack: news-events) — reverse of news_sentiment.
+    ``fn(query) -> dict`` entity-links a news item to live Polymarket markets and rates
+    each one's likely direction for YES. The event-driven scouting tool."""
+    def run(ctx: Context) -> dict:
+        return {"news_markets": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("news_to_markets",
+                      "Given a NEWS item / headline / event, find which live Polymarket markets it "
+                      "affects and the likely direction (📈利好/📉利空) for each, with why. The reverse "
+                      "of news_sentiment. Use for '这条新闻影响哪些标的 / 利好利空哪些市场 / news → markets "
+                      "/ <某事件>会影响哪些盘'. Needs the news-events pack.",
+                      frozenset({"question"}), frozenset({"news_markets"}), run, cost=4)
+
+
 def log_prediction_capability(fn: Callable) -> Capability:
     """Log the user's own subjective probability call (pack: prediction-journal).
     ``fn(query) -> dict`` parses the %/decimal, resolves the market, and records
