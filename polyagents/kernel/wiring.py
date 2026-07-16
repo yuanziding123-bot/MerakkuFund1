@@ -662,7 +662,45 @@ def default_registry() -> list:
         return {"change": round(float(c[-1].close) - float(ref), 4), "n": len(c),
                 "last": round(float(c[-1].close), 4)}
 
-    def market_radar(query=None, scan=60, deep=28, expiry_days=5.0):
+    _WIN_ON_RE = re.compile(r"will\s+(.+?)\s+win\s+on\s+([\d-]+)", re.I)
+    _SCORE_RE = re.compile(r"exact score:\s*(.+?)\s+(\d+)\s*-\s*(\d+)\s+(.+?)\?*$", re.I)
+
+    def _match_consistency(rows):
+        """Computable structural checks on match markets: winner Σ + implied draw/other,
+        and the (partial) exact-score Σ. Σ>1 = genuine overround (sell all → arb)."""
+        winners, matches = {}, {}
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", "")); p = float(r.get("price") or 0.0)
+            mw = _WIN_ON_RE.search(q)
+            if mw:
+                winners[mw.group(1).strip().lower()] = {"team": mw.group(1).strip(), "price": round(p, 4)}
+                continue
+            ms = _SCORE_RE.search(q)
+            if ms:
+                a, sa, sb, b = ms.group(1).strip(), int(ms.group(2)), int(ms.group(3)), ms.group(4).strip()
+                key = frozenset((a.lower(), b.lower()))
+                matches.setdefault(key, {"teams": (a, b), "scores": []})["scores"].append(
+                    {"a": sa, "b": sb, "price": round(p, 4)})
+        out = []
+        for mt in matches.values():
+            a, b = mt["teams"]
+            wa, wb = winners.get(a.lower()), winners.get(b.lower())
+            row = {"match": f"{a} vs {b}", "n_scores": len(mt["scores"]),
+                   "exact_sum_partial": round(sum(s["price"] for s in mt["scores"]), 4)}
+            row["exact_overround"] = row["exact_sum_partial"] > 1.01     # subset already >1 → sell all
+            if wa and wb:
+                pa, pb = wa["price"], wb["price"]
+                row.update({"p_a": pa, "p_b": pb, "winner_sum": round(pa + pb, 4),
+                            "implied_draw_other": round(1 - pa - pb, 4),
+                            "winner_overround": (pa + pb) > 1.01})       # sell both winners → arb
+            out.append(row)
+        out.sort(key=lambda r: (r.get("exact_overround") or r.get("winner_overround", False),
+                                r.get("n_scores", 0)), reverse=True)
+        return out
+
+    def market_radar(query=None, scan=100, deep=28, expiry_days=5.0):
         """Surface leads for a human to dig into: biggest recent movers, markets near
         resolution, and short-history (possibly newly-listed / thin) markets. Computed
         from live prices + candle history; no verdicts, just where to look."""
@@ -703,20 +741,22 @@ def default_registry() -> list:
         for m in fresh:
             m["why"] = f"仅 {m.get('n_candles')} 个历史点,可能新挂/低活跃 → 定价未必充分,先建立观点"
 
+        structural = _match_consistency(rows)               # computable match Σ / draw / exact-score checks
+
         insight = None                                      # LLM angle + arbitrage suggestions (grounded)
         try:
             import json as _json
-            board = _json.dumps({"movers": movers, "near_resolution": near_out, "fresh": fresh},
-                                ensure_ascii=False, default=str)[:2400]
+            board = _json.dumps({"movers": movers, "near_resolution": near_out, "fresh": fresh,
+                                 "structural_checks": structural[:6]},
+                                ensure_ascii=False, default=str)[:2600]
             sys = ("You are a prediction-market scout. Given this radar board (movers / "
-                   "near-resolution / fresh markets with live prices), for the 3-4 MOST "
-                   "interesting leads say in one line WHY it's worth attention, then give 1-2 "
-                   "concrete ANGLES / possible cross-market checks to verify — e.g. do the exact-"
-                   "score markets for a match sum near 1, is a semifinal-winner priced consistently "
-                   "with that team's championship market (champ ≤ advance), match-winner vs draw gap. "
-                   "Only reference markets/prices present in the board; NEVER claim an arbitrage "
-                   "exists unless the given prices show it — frame as '值得查' with the reason. "
-                   "Answer in the user's language, <170 words, concise bullets.")
+                   "near-resolution / fresh + COMPUTED structural_checks with real numbers), for the "
+                   "3-4 MOST interesting leads say in one line WHY it's worth attention + 1-2 concrete "
+                   "ANGLES to verify. USE the structural_checks numbers: winner_sum (P(A)+P(B)) and "
+                   "implied_draw_other, exact_sum_partial. If winner_overround or exact_overround is "
+                   "true, that IS a genuine sell-all arbitrage — state it with the numbers. Otherwise "
+                   "frame cross-market checks as '值得查'. Only reference markets/prices in the board; "
+                   "never invent numbers. Answer in the user's language, <180 words, concise bullets.")
             resp = eng._get_llm().invoke([("system", sys), ("user", f"Radar board:\n{board}")])
             text = getattr(resp, "content", resp)
             if isinstance(text, list):
@@ -726,7 +766,8 @@ def default_registry() -> list:
             insight = f"(角度生成失败:{type(exc).__name__};以下为线索表。)"
 
         return {"query": query, "n_scanned": len(mkts), "n_deep": min(deep, len(mkts)),
-                "movers": movers, "near_resolution": near_out, "fresh": fresh, "insight": insight}
+                "movers": movers, "near_resolution": near_out, "fresh": fresh,
+                "structural": structural, "insight": insight}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 

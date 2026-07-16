@@ -1072,6 +1072,17 @@ def _format_radar(a: dict, path: str) -> str:
     if a.get("insight"):
         lines.append("\n**🎯 角度与套利建议(值得查,非保证)**\n")
         lines.append(a["insight"])
+    struct = a.get("structural") or []
+    if struct:
+        lines.append("\n**📐 结构性一致性检查(可计算)**")
+        lines.append("\n| 比赛 | 胜方Σ P(A)+P(B) | 隐含平局/其它 | 精确比分Σ(部分,n) | 超额套利 |")
+        lines.append("|---|---|---|---|---|")
+        for s in struct[:6]:
+            wsum = s.get("winner_sum")
+            arb = "🟢 卖出" if (s.get("winner_overround") or s.get("exact_overround")) else "—"
+            lines.append(f"| {s.get('match')} | {wsum if wsum is not None else '—'} | "
+                         f"{s.get('implied_draw_other', '—')} | {s.get('exact_sum_partial')} (n={s.get('n_scores')}) | {arb} |")
+        lines.append("　_胜方Σ>1 或 精确比分Σ>1 = 真·超额,全卖即套利(需扣摩擦);Σ<1 属正常(有平局/未收全)。_")
     movers = a.get("movers") or []
     if movers:
         lines.append("\n**① 异动(近期价格变化最大)**")
