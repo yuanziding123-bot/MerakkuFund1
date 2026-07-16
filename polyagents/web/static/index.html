@@ -201,6 +201,19 @@
   .strategy-pill b{display:block;font-size:13px;margin-bottom:5px}
   .strategy-pill span{display:block;color:var(--mute);font-size:12px;line-height:1.4}
   .next-hint{border:1px solid var(--toolline);background:var(--tool);border-radius:var(--radius-sm);padding:10px 12px;color:var(--body-strong);font-size:13px;line-height:1.5}
+  .readiness-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-bottom:10px}
+  .ready-item{border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:10px 12px}
+  .ready-item .k{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+  .ready-item .v{font-weight:500;font-size:14px}
+  .ready-item.ok{border-color:rgba(125,171,125,.55)}
+  .ready-item.warn{border-color:rgba(201,174,98,.55)}
+  .report-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin:10px 0 12px}
+  .report-card{border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:10px 12px}
+  .report-card .k{color:var(--mute);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+  .report-card .v{font:16px "DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:4px}
+  .review-checklist{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:10px 0 12px}
+  .review-check{border:1px solid var(--hairline);background:var(--canvas);border-radius:var(--radius-sm);padding:9px 11px;font-size:12.5px;line-height:1.45}
+  .review-check b{display:block;font-size:12px;margin-bottom:3px}
   @media(max-width:900px){.workflow{grid-template-columns:1fr 1fr}}
   @media(max-width:560px){.workflow{grid-template-columns:1fr}}
 
@@ -702,6 +715,11 @@
         </div>
 
         <div class="panel">
+          <div class="panel-h"><span>Launch readiness · system checks</span><button onclick="loadLabSystemStatus()">refresh</button></div>
+          <div id="labSystemStatus"><div class="hist">检查 DB、news API、live execution 和 audit 状态。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
           <div class="panel-h"><span>Data ingestion · historical settled collections</span><button onclick="loadLabDataStatus()">refresh</button></div>
           <div class="cards" id="labDataCards"></div>
           <div class="st-controls" style="margin-top:12px">
@@ -1619,7 +1637,32 @@ async function loadLabWorkflow(){
   renderLabWorkflowSelectors();
   renderLabStrategyCatalog();
   renderLabReportLedger();
+  await loadLabSystemStatus();
   await loadLabDataStatus();
+}
+async function loadLabSystemStatus(){
+  const el=document.getElementById('labSystemStatus');
+  if(!el) return;
+  el.innerHTML='<div class="hist">loading readiness…</div>';
+  try{
+    const s=await labFetchJson('/api/lab/system/status');
+    const db=s.database||{}, rd=s.readiness||{};
+    const tav=(s.data_sources||[]).find(x=>x.id==='tavily')||{};
+    const items=[
+      ['Database', db.backend||'unknown', db.production_ready?'ok':'warn', db.production_ready?'production backend':'SQLite/dev backend'],
+      ['News evidence', tav.status||'unknown', tav.status==='configured'?'ok':'warn', tav.status==='configured'?'Tavily configured':'news feature disabled'],
+      ['Execution', s.live_tools_enabled?'live enabled':'paper / dry-run', s.live_tools_enabled?'warn':'ok', s.live_tools_enabled?'needs operator gate':'no live orders'],
+      ['Audit', s.audit_enabled?'enabled':'unknown', s.audit_enabled?'ok':'warn', 'Lab API events recorded'],
+    ];
+    const issueHtml=(rd.issues||[]).length
+      ? `<div class="hist">Readiness issues: ${(rd.issues||[]).map(esc).join(' · ')}</div>`
+      : '<div class="hist"><span class="v-pos">production_ready=true</span> · no blocking readiness issues reported.</div>';
+    el.innerHTML='<div class="readiness-grid">'+items.map(x=>
+      `<div class="ready-item ${x[2]}"><div class="k">${esc(x[0])}</div><div class="v">${esc(x[1])}</div><div class="hist" style="padding:0;margin-top:3px">${esc(x[3])}</div></div>`
+    ).join('')+'</div>'+issueHtml;
+  }catch(e){
+    el.innerHTML='<div class="st-err">⚠ readiness unavailable: '+esc(e.message||e)+'</div>';
+  }
 }
 async function loadLabDataStatus(){
   const el=document.getElementById('labDataCards');
@@ -1645,11 +1688,19 @@ async function runLabIngestion(){
   const btn=document.getElementById('labIngestRun');
   const out=document.getElementById('labIngestResult');
   btn.disabled=true; btn.textContent='running…';
-  out.innerHTML='<div class="hist">Fetching resolved markets → prices-history → PIT collections…</div>';
+  out.innerHTML='<div class="hist">Creating ingestion job…</div>';
   try{
     const limit=+(document.getElementById('labIngestLimit').value||100);
-    const r=await labFetchJson('/api/lab/data/ingest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
-    const s=r.stats||{};
+    let job=await labFetchJson('/api/lab/data/ingest-jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
+    out.innerHTML='<div class="hist">job <span class="mono">'+esc(job.id)+'</span> · '+esc(job.status)+' · fetching resolved markets → prices-history → PIT collections…</div>';
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    for(let i=0;i<180 && !['completed','failed'].includes(job.status);i++){
+      await wait(1500);
+      job=await labFetchJson('/api/lab/data/ingest-jobs/'+encodeURIComponent(job.id));
+      out.innerHTML='<div class="hist">job <span class="mono">'+esc(job.id)+'</span> · '+esc(job.status)+' · started='+(job.started_at||'—')+'</div>';
+    }
+    if(job.status!=='completed') throw new Error(job.error || 'ingestion job did not complete');
+    const s=job.stats||{};
     out.innerHTML=`<pre class="evalbox">inserted: ${s.inserted??0}\nduplicates: ${s.duplicates??0}\nupdated_duplicates: ${s.updated_duplicates??0}\nskipped_non_binary: ${s.skipped_non_binary??0}\nskipped_no_price_history: ${s.skipped_no_price_history??0}\nskipped_pit: ${s.skipped_pit??0}\nnews_items_used: ${s.news_items_used??0}\nnews_items_skipped_no_published: ${s.news_items_skipped_no_published??0}\nnews_items_skipped_future: ${s.news_items_skipped_future??0}\nnews_cache_hits: ${s.news_cache_hits??0}\nnews_cache_misses: ${s.news_cache_misses??0}</pre>`;
     await loadLabDataStatus();
   }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
@@ -1742,6 +1793,7 @@ function renderLabReport(rep){
   const dq=rep.data_quality||{};
   const uni=rep.market_universe||{};
   const sc=rep.scorecard||{};
+  const ss=rep.sample_structure||{};
   const sourceLabel = uni.source === 'collections'
     ? '<span class="v-pos">真实历史 collections</span>'
     : (uni.source === 'fixture'
@@ -1755,6 +1807,21 @@ function renderLabReport(rep){
     : '';
   const warnings=(rep.pit_warnings||[]).slice(0,3).map(w=>
     `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
+  const clusterAdequate = ss.cluster_adjusted_sample_adequate ?? dq.cluster_adjusted_sample_adequate;
+  const reviewChecks=[
+    ['Data source', uni.source === 'collections' && !dq.uses_fixture_data ? '真实 collections' : 'fixture/demo', uni.source === 'collections' && !dq.uses_fixture_data],
+    ['Sample independence', `${ss.condition_cluster_count??'—'} condition clusters`, clusterAdequate===true],
+    ['PIT integrity', dq.pit_clean!==false ? 'pit clean' : 'has warnings', dq.pit_clean!==false],
+    ['Promotion gate', rep.gates&&rep.gates.paper_ready ? 'paper ready' : 'not ready', !!(rep.gates&&rep.gates.paper_ready)],
+  ];
+  const summaryCards=[
+    ['source', uni.source||'—'],
+    ['n', m.n ?? '—'],
+    ['condition clusters', ss.condition_cluster_count ?? dq.condition_cluster_count ?? '—'],
+    ['brier Δ', typeof m.brier_delta==='number' ? m.brier_delta.toFixed(3) : '—'],
+    ['ECE', typeof m.ece==='number' ? m.ece.toFixed(3) : '—'],
+    ['fixture', dq.uses_fixture_data===true ? 'yes' : 'no'],
+  ];
   const sample=(rep.market_sample||[]).slice(0,5).map(x=>{
     const ne=x.news_evidence||{};
     const ee=x.edge_evidence||{};
@@ -1780,8 +1847,12 @@ function renderLabReport(rep){
   target.innerHTML=
     `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · strategy=${esc(cfg.strategy_id||cfg.signal_model_id||'—')} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
     sampleNote + fixtureNote +
+    '<div class="report-summary">'+summaryCards.map(x=>`<div class="report-card"><div class="k">${esc(x[0])}</div><div class="v">${esc(String(x[1]))}</div></div>`).join('')+'</div>'+
+    '<div class="review-checklist">'+reviewChecks.map(x=>`<div class="review-check"><b>${x[2]?'<span class="v-pos">pass</span>':'<span class="v-neg">check</span>'} · ${esc(x[0])}</b>${esc(x[1])}</div>`).join('')+'</div>'+
+    '<div class="next-hint">Review order: source → sample independence → PIT warnings → Brier/log-loss vs market → market_sample evidence. 只有真实 collections、PIT clean、cluster 样本足够时，才适合进入 promotion 讨论。</div>'+
     `<pre class="evalbox">window: ${(rep.time_window&&rep.time_window.start)||'—'} → ${(rep.time_window&&rep.time_window.end)||'—'}\n`+
     `source: ${uni.source||'—'} · fixture: ${dq.uses_fixture_data===true} · fetched: ${uni.fetched_markets??'—'} · eligible: ${uni.eligible_markets??'—'} · skipped: category=${uni.skipped_by_category??0}, unresolved=${uni.skipped_unresolved??0}, pit=${uni.skipped_pit??0}\n`+
+    `sample_structure: samples=${ss.sample_count??m.n??'—'} · tokens=${ss.token_count??'—'} · condition_clusters=${ss.condition_cluster_count??dq.condition_cluster_count??'—'} · cluster_adequate=${ss.cluster_adjusted_sample_adequate??dq.cluster_adjusted_sample_adequate??false}\n`+
     `n: ${m.n} · brier_model: ${Number(m.brier_model||0).toFixed(3)} · brier_market: ${Number(m.brier_market||0).toFixed(3)}\n`+
     `brier_delta: ${Number(m.brier_delta||0).toFixed(3)} · ece: ${Number(m.ece||0).toFixed(3)} · sample_adequate: ${m.sample_adequate}\n`+
     `log_loss_model: ${Number(sc.model_log_loss||0).toFixed(3)} · log_loss_market: ${Number(sc.market_log_loss||0).toFixed(3)} · pit_clean: ${dq.pit_clean!==false}\n`+
@@ -1809,7 +1880,7 @@ function renderLabMonitor(r){
   const out=document.getElementById('labMonitorResult');
   const opps=r.opportunities||[];
   if(!opps.length){
-    out.innerHTML=`<div class="hist">dry_run=true · ${esc(r.message||'no opportunity')} · errors=${(r.errors||[]).length}</div>`;
+    out.innerHTML=`<div class="next-hint">dry_run=true · ${esc(r.message||'no opportunity')} · errors=${(r.errors||[]).length}<br>No opportunity means the selected strategy and deterministic risk gate did not find an edge above threshold in the scanned active markets; it is a valid scan result, not a failed backtest.</div>`;
     return;
   }
   out.innerHTML=
