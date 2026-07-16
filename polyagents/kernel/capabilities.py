@@ -305,6 +305,21 @@ def research_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
 
 
+def market_radar_capability(fn: Callable) -> Capability:
+    """Market radar (pack: market-radar) — 'what changed today'. ``fn(query) -> dict``
+    sweeps live markets and surfaces leads for a human to dig into: biggest recent price
+    movers, markets near resolution, and short-history (possibly newly-listed / thin)
+    markets. No verdicts — a discovery funnel for subjective alpha hunting."""
+    def run(ctx: Context) -> dict:
+        return {"market_radar": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("market_radar",
+                      "Scan the market for LEADS to dig into: biggest recent movers (price % "
+                      "change), markets near resolution (endgame), and short-history / newly-listed "
+                      "markets. Use for 'what changed today / what's moving / 有什么异动 / 快到期的 / "
+                      "新上市的市场 / 市场雷达 / 从哪找机会'. Surfaces candidates, does not decide.",
+                      frozenset({"question"}), frozenset({"market_radar"}), run, cost=6)
+
+
 def scan_conditional_arb_capability(fn: Callable) -> Capability:
     """Cross-market conditional / implication arbitrage scanner (pack: conditional-arb).
     ``fn(query) -> dict`` sweeps the market for entities whose championship market links to

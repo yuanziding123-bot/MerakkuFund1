@@ -42,6 +42,12 @@ PACKS: dict[str, dict] = {
         "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
         "capabilities": ["news_sentiment"],
     },
+    "market-radar": {
+        "name": "市场雷达(今天有什么变了)",
+        "description": "扫全市场,surface 给人肉深挖的线索:近期价格**异动**最大的、**临近结算**的(endgame)、"
+                       "**短历史/可能新上市**的。只给候选、不下结论——主观找 alpha 的发现漏斗。",
+        "capabilities": ["market_radar"],
+    },
     "conditional-arb": {
         "name": "跨市场条件套利扫描",
         "description": "扫全市场找'冠军 × 晋级/单场'的条件概率关联链:算 P(夺冠|晋级)=P(夺冠)/P(晋级),"

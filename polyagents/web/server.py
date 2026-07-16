@@ -1057,6 +1057,40 @@ def _format_alpha_review(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_radar(a: dict, path: str) -> str:
+    """Render the market radar: movers / near-resolution / fresh — leads to dig into."""
+    lines = [f"**市场雷达 · market_radar** · {path}", "",
+             f"_扫了 {a.get('n_scanned')} 个市场(深检 {a.get('n_deep')} 个)· 只给线索,不下结论_"]
+    movers = a.get("movers") or []
+    if movers:
+        lines.append("\n**① 异动(近期价格变化最大)**")
+        lines.append("\n| 市场 | 现价 | 近期Δ | 24h量 |")
+        lines.append("|---|---|---|---|")
+        for m in movers:
+            lines.append(f"| {(m.get('question') or '')[:36]} | {m.get('price')} | "
+                         f"**{m.get('change'):+}** | {m.get('volume_24h'):,} |")
+    near = a.get("near_resolution") or []
+    if near:
+        lines.append("\n**② 临近结算(endgame,波动大)**")
+        lines.append("\n| 市场 | 现价 | 到期 | 流动性 |")
+        lines.append("|---|---|---|---|")
+        for m in near:
+            lines.append(f"| {(m.get('question') or '')[:36]} | {m.get('price')} | "
+                         f"{m.get('days')}d | {m.get('liquidity'):,} |")
+    fresh = a.get("fresh") or []
+    if fresh:
+        lines.append("\n**③ 短历史(可能新上市 / 低活跃,定价未必充分)**")
+        lines.append("\n| 市场 | 现价 | 历史点数 |")
+        lines.append("|---|---|---|")
+        for m in fresh:
+            lines.append(f"| {(m.get('question') or '')[:40]} | {m.get('price')} | {m.get('n_candles')} |")
+    if not (movers or near or fresh):
+        lines.append("\n当前没扫到明显线索(市场平静 / 数据不足)。")
+    lines.append("\n_① 异动=有新信息在推价,值得查为什么;② 临近结算=单一事件即定生死,适合有观点时下手;"
+                 "③ 短历史=定价可能还没充分。挑一个深挖 → analyze_market;想验证想法 → research_alpha。_")
+    return "\n".join(lines)
+
+
 def _format_conditional_arb(a: dict, path: str) -> str:
     """Render the cross-market conditional/implication arbitrage scan."""
     chains = a.get("chains") or []
@@ -1337,6 +1371,8 @@ def _kernel_summary(ctx) -> str:
     # controller may have also run as an intermediate step.
     if "alpha_review" in f:                              # strategy validation + improvement
         return _format_alpha_review(f["alpha_review"], path)
+    if "market_radar" in f:                              # 'what changed today' discovery funnel
+        return _format_radar(f["market_radar"], path)
     if "conditional_arb" in f:                           # cross-market conditional/implication arb scan
         return _format_conditional_arb(f["conditional_arb"], path)
     if "relational_alpha" in f:                          # event-relatedness engine

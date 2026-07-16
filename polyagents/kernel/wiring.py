@@ -22,6 +22,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
+                           market_radar_capability,
                            plot_market_capability, relational_alpha_capability,
                            research_alpha_capability, scan_conditional_arb_capability,
                            promotion_gate_capability, recommend_markets_capability,
@@ -650,6 +651,48 @@ def default_registry() -> list:
         return {"query": query, "n_entities": len(ents), "n_chains": len(chains),
                 "n_true_arb": sum(1 for c in chains if c["has_arb"]), "chains": chains[:max_show]}
 
+    # ----- pack: market-radar ("what changed today" — movers / near-resolution / fresh) --
+
+    def _radar_move(token_id, bars=24):
+        """Recent price move + history length (age proxy) for a market token."""
+        c = eng.client.fetch_price_history(token_id, interval="max") or []
+        if len(c) < 2:
+            return {"change": 0.0, "n": len(c), "last": (c[-1].close if c else None)}
+        ref = c[-min(bars, len(c))].close
+        return {"change": round(float(c[-1].close) - float(ref), 4), "n": len(c),
+                "last": round(float(c[-1].close), 4)}
+
+    def market_radar(query=None, scan=60, deep=28, expiry_days=5.0):
+        """Surface leads for a human to dig into: biggest recent movers, markets near
+        resolution, and short-history (possibly newly-listed / thin) markets. Computed
+        from live prices + candle history; no verdicts, just where to look."""
+        rows = mcp_server.scan_markets(limit=scan, min_volume_24h=1000.0)
+        seen, mkts = set(), []
+        for r in rows:                                      # dedup by market, keep the YES side
+            cid = r.get("condition_id")
+            if r.get("outcome") != "YES" or cid in seen:
+                continue
+            seen.add(cid); mkts.append(r)
+        near = sorted([m for m in mkts if 0 < float(m.get("days_to_expiry") or 999) <= expiry_days],
+                      key=lambda m: float(m.get("days_to_expiry") or 999))[:8]
+        near_out = [{"question": m.get("question"), "price": round(float(m.get("price") or 0), 4),
+                     "days": round(float(m.get("days_to_expiry") or 0), 1),
+                     "liquidity": round(float(m.get("liquidity") or 0)),
+                     "volume_24h": round(float(m.get("volume_24h") or 0))} for m in near]
+        scored = []                                         # movers + freshness need candle history
+        for m in mkts[:deep]:
+            mv = _radar_move(m.get("token_id"))
+            scored.append({"question": m.get("question"), "price": round(float(m.get("price") or 0), 4),
+                           "change": mv["change"], "n_candles": mv["n"],
+                           "volume_24h": round(float(m.get("volume_24h") or 0)),
+                           "days": round(float(m.get("days_to_expiry") or 0), 1)})
+        movers = sorted([s for s in scored if s["n_candles"] >= 2],
+                        key=lambda s: -abs(s["change"]))[:8]
+        fresh = sorted([s for s in scored if 2 <= s["n_candles"] <= 30],
+                       key=lambda s: s["n_candles"])[:6]
+        return {"query": query, "n_scanned": len(mkts), "n_deep": min(deep, len(mkts)),
+                "movers": movers, "near_resolution": near_out, "fresh": fresh}
+
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
     def backfill_outcomes(query, limit=1000):
@@ -1181,6 +1224,7 @@ def default_registry() -> list:
         relational_alpha_capability(relational_alpha),
         research_alpha_capability(research_alpha),
         scan_conditional_arb_capability(scan_conditional_arb),
+        market_radar_capability(market_radar),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),
