@@ -29,12 +29,13 @@ def _goal_for(mode: str, request: str | None, facts: dict) -> Goal:
     return recognize(request or "")
 
 
-def _default_controller_llm():
-    """Build the controller LLM (best-effort; None if unavailable → deterministic)."""
+def _default_controller_llm(model: str | None = None):
+    """Build the controller LLM (best-effort; None if unavailable → deterministic).
+    ``model`` = the user-selected model (honored per provider by build_chat_llm)."""
     try:
         from polyagents.llm import build_chat_llm
         from polyagents.web.agent import resolve_model
-        model = os.getenv("KERNEL_CONTROLLER_MODEL") or resolve_model(None)
+        model = model or os.getenv("KERNEL_CONTROLLER_MODEL") or resolve_model(None)
         return build_chat_llm(model=model, temperature=0.0)
     except Exception:
         return None
@@ -49,15 +50,16 @@ def _as_context(result: KernelResult) -> Context:
 
 
 def run_mode(mode: str, *, request: str | None = None, registry: list | None = None,
-             max_steps: int = 12, llm=None, history=None, fallback_planner=None,
-             packs: list[str] | None = None, audit=None, on_event=None, **facts) -> Context:
+             max_steps: int = 12, llm=None, model: str | None = None, history=None,
+             fallback_planner=None, packs: list[str] | None = None, audit=None,
+             on_event=None, **facts) -> Context:
     """Run ``mode`` through the kernel. ``registry`` overrides the wiring (tests);
-    ``llm`` overrides the controller model; ``history`` is the prior conversation
-    (kernel mode, cross-turn memory); ``packs`` selects which vertical capability packs
-    to load (kernel mode). Returns a Context."""
+    ``llm`` overrides the controller LLM outright, else ``model`` picks it; ``history``
+    is the prior conversation (kernel mode, cross-turn memory); ``packs`` selects which
+    vertical capability packs to load (kernel mode). Returns a Context."""
     reg = registry if registry is not None else registry_for(mode, packs)
     if mode == "kernel":
-        controller_llm = llm if llm is not None else _default_controller_llm()
+        controller_llm = llm if llm is not None else _default_controller_llm(model)
         if controller_llm is not None:
             ctrl_facts = {"event": request, **facts}   # so data_agent is selectable by the LLM
             ctrl = KernelController(reg, controller_llm, max_steps=max_steps,

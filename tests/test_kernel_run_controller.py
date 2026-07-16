@@ -43,7 +43,7 @@ def test_kernel_mode_chains_data_backtest_via_controller():
 
 
 def test_kernel_mode_falls_back_to_deterministic_without_llm(monkeypatch):
-    monkeypatch.setattr(run_mod, "_default_controller_llm", lambda: None)
+    monkeypatch.setattr(run_mod, "_default_controller_llm", lambda *_a: None)
     reg = build_registry(fetch_fn=lambda e: {"event": e, "markets": [1, 2]},
                          backtest_fn=lambda h: {"n_markets": len(h["markets"])})
     ctx = run_mode("kernel", request="对某事件做 backtest", registry=reg)  # llm=None

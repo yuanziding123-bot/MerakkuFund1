@@ -56,7 +56,7 @@ def test_dead_llm_is_flagged_not_ok():
 
 def test_run_mode_kernel_falls_back_to_deterministic_when_llm_dead(monkeypatch):
     # the real situation: org disabled → controller can't drive → deterministic path
-    monkeypatch.setattr(run_mod, "_default_controller_llm", lambda: DeadLLM())
+    monkeypatch.setattr(run_mod, "_default_controller_llm", lambda *_a: DeadLLM())
     reg = build_registry(fetch_fn=lambda e: {"event": e, "markets": [1, 2]},
                          backtest_fn=lambda h: {"n_markets": len(h["markets"])})
     ctx = run_mode("kernel", request="对某事件做 backtest", registry=reg)

@@ -651,7 +651,7 @@
           <div class="ctoolbar">
             <button class="cplus" id="plusBtn" title="Add" onclick="toggleCMenu(event,'plusMenu')">＋</button>
             <button class="ctbtn" id="modeBtn" title="回答模式(Ask 只读)" onclick="toggleCMenu(event,'modeMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span id="modeLbl">Kernel</span><span class="cv">▾</span></button>
-            <button class="ctbtn" id="modelBtn" title="模型" onclick="toggleCMenu(event,'modelMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span id="modelLbl">Sonnet 4.6</span><span class="cv">▾</span></button>
+            <button class="ctbtn" id="modelBtn" title="模型" onclick="toggleCMenu(event,'modelMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span id="modelLbl">DeepSeek Chat</span><span class="cv">▾</span></button>
             <span class="cspacer"></span>
             <button class="cicon" title="附件" onclick="document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17a1.5 1.5 0 0 1-2-2l8-8"/></svg></button>
             <button class="csend" id="send" title="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
@@ -659,7 +659,7 @@
 
           <div class="cpop" id="plusMenu">
             <button class="cmi" onclick="closeCMenus();document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3v5h5M14 3l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>Upload files</button>
-            <button class="cmi" onmouseenter="openSkillsFly()" onclick="openSkillsFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2a7 7 0 0 0-4-12z"/></svg>Skills<small class="cmi-sub">垂直包 + 工作流,选中加载</small><span class="cchev">›</span></button>
+            <button class="cmi" onmouseenter="openSkillsFly()" onclick="openSkillsFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2a7 7 0 0 0-4-12z"/></svg>Skills<small class="cmi-sub">垂直包,选中加载进 loop</small><span class="cchev">›</span></button>
           </div>
           <div class="cpop" id="skillsFly"></div>
           <div class="cpop" id="modeMenu">
@@ -669,9 +669,8 @@
             <button class="cmrow" onclick="pickMode('general','General',this)">General<small>泛问题/编码/web 搜索</small></button>
           </div>
           <div class="cpop" id="modelMenu">
-            <button class="cmrow" onclick="pickModel('claude-sonnet-4-6','Sonnet 4.6',this)">Sonnet 4.6<small>均衡 · 默认</small><span class="ctick">✓</span></button>
-            <button class="cmrow" onclick="pickModel('claude-opus-4-8','Opus 4.8',this)">Opus 4.8<small>最强 · 较贵</small></button>
-            <button class="cmrow" onclick="pickModel('claude-haiku-4-5-20251001','Haiku 4.5',this)">Haiku 4.5<small>最快 · 省钱</small></button>
+            <button class="cmrow" onclick="pickModel('deepseek-chat','DeepSeek Chat',this)">DeepSeek Chat<small>均衡 · 默认(V3)</small><span class="ctick">✓</span></button>
+            <button class="cmrow" onclick="pickModel('deepseek-reasoner','DeepSeek Reasoner',this)">DeepSeek Reasoner<small>推理更强 · 较慢(R1)</small></button>
           </div>
         </div>
       </div>
@@ -957,7 +956,7 @@ function renderSkillsSummary(){
 }
 
 // ---- Ask composer: + menu, skills flyout, model selector ----
-let selectedModel = 'claude-sonnet-4-6';
+let selectedModel = 'deepseek-chat';
 function closeCMenus(){ document.querySelectorAll('.cpop.open').forEach(p=>p.classList.remove('open')); }
 function toggleCMenu(e, id){
   e.stopPropagation();
@@ -977,10 +976,11 @@ async function loadLibraryItems(){
 function _isOn(it){ return it.kind==='pack' ? selectedPacks.has(it.id) : selected.has(it.id); }
 function openSkillsFly(){
   const fly = document.getElementById('skillsFly');
-  const sel = allLibrary.filter(s => s.loading==='select');
-  const tag = k => k==='pack' ? '<span class="lib-badge kind">垂直包</span>' : '<span class="lib-badge kind">工作流</span>';
+  // kernel picker: only vertical PACKS (workflows are legacy Domain-mode, kernel ignores them)
+  const sel = allLibrary.filter(s => s.loading==='select' && s.kind==='pack');
+  const tag = k => '<span class="lib-badge kind">垂直包</span>';
   fly.innerHTML = sel.length ? (
-    `<div class="pd" style="padding:6px 12px 2px">选中才加载;垂直包→进 Kernel loop,工作流→Domain 提示</div>` +
+    `<div class="pd" style="padding:6px 12px 2px">选中才加载进 Kernel loop</div>` +
     sel.map(s =>
     `<div class="cfly-row ${_isOn(s)?'on':''}" onclick="toggleLibItem(event,'${esc(s.id)}','${s.kind}')">
        <div class="pc">✓</div>

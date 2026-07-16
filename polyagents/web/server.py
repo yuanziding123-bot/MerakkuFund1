@@ -1522,7 +1522,8 @@ def _kernel_summary(ctx) -> str:
 
 
 async def _stream_kernel(history: list[dict], session: "AgentSession",
-                         packs: list[str] | None = None) -> AsyncIterator[str]:
+                         packs: list[str] | None = None,
+                         model: str | None = None) -> AsyncIterator[str]:
     """Kernel mode: the request goes through the ONE kernel loop, which recognises
     intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
     …). The prior turns are passed as cross-turn memory; ``packs`` selects which
@@ -1545,7 +1546,8 @@ async def _stream_kernel(history: list[dict], session: "AgentSession",
 
     def work() -> None:
         try:
-            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs, on_event=on_event)
+            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs,
+                           model=model, on_event=on_event)
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
         except Exception as exc:                        # surface, don't crash the stream
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
@@ -1602,7 +1604,7 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     if mode == "kernel":
         session.log("session.start", model=model, skills=skills,
                     attachments=len(attachments or []))
-        async for ev in _stream_kernel(history, session, packs):
+        async for ev in _stream_kernel(history, session, packs, model=model):
             yield ev
         return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),

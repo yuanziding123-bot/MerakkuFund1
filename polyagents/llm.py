@@ -26,8 +26,13 @@ def _openai_compatible(model: str | None, temperature: float, *, api_key: str,
                        base_url: str, default_model: str):
     from langchain_openai import ChatOpenAI
 
+    # Honor a caller-supplied model only if it's a real model for THIS provider
+    # (the UI can pass 'deepseek-chat' / 'deepseek-reasoner'); Anthropic ids from
+    # internal call sites are ignored and fall back to the env / default.
+    prefix = default_model.split("-", 1)[0]                # 'deepseek' / 'gpt' / …
+    passthru = model if (model and str(model).startswith(prefix)) else None
     return ChatOpenAI(
-        model=os.getenv("DEEPSEEK_MODEL") or os.getenv("OPENAI_MODEL") or default_model,
+        model=passthru or os.getenv("DEEPSEEK_MODEL") or os.getenv("OPENAI_MODEL") or default_model,
         api_key=api_key,
         base_url=base_url,
         temperature=temperature,
