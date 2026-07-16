@@ -322,6 +322,7 @@ class BacktestRunner:
                     source="collections",
                     signal_model=model_output,
                     news_evidence=self._news_evidence(raw),
+                    edge_evidence=self._edge_evidence(forecast, raw, model_output),
                     snapshot_manifest=self._snapshot_manifest(
                         token=token,
                         row=row,
@@ -403,6 +404,7 @@ class BacktestRunner:
         source: str,
         signal_model: dict | None = None,
         news_evidence: dict | None = None,
+        edge_evidence: dict | None = None,
         snapshot_manifest: dict | None = None,
     ) -> dict:
         outcome = float(forecast.outcome) if forecast.outcome is not None else None
@@ -424,8 +426,54 @@ class BacktestRunner:
             "absolute_error_model": abs(forecast.p_cal - outcome) if outcome is not None else None,
             "absolute_error_market": abs(forecast.p_market - outcome) if outcome is not None else None,
             "signal_model": signal_model,
+            "edge_evidence": edge_evidence or BacktestRunner._edge_evidence(forecast, {}, signal_model),
             "news_evidence": news_evidence,
             "snapshot_manifest": snapshot_manifest,
+        }
+
+    @staticmethod
+    def _edge_evidence(forecast: ForecastRecord, raw: dict, signal_model: dict | None = None) -> dict:
+        market = raw.get("market") if isinstance(raw, dict) else {}
+        market = market if isinstance(market, dict) else {}
+        orderbook = raw.get("orderbook") if isinstance(raw, dict) else {}
+        orderbook = orderbook if isinstance(orderbook, dict) else {}
+        signal_model = signal_model or {}
+        research_edge = float(forecast.p_cal) - float(forecast.p_market)
+        best_ask = orderbook.get("best_ask")
+        try:
+            entry_price = float(best_ask) if best_ask is not None else float(forecast.p_market)
+        except (TypeError, ValueError):
+            entry_price = float(forecast.p_market)
+        executable_available = best_ask is not None
+        return {
+            "edge_type": "research_probability_gap",
+            "research_edge": research_edge,
+            "entry_price_proxy": entry_price,
+            "executable_edge": (float(forecast.p_cal) - entry_price) if executable_available else None,
+            "executable_edge_available": executable_available,
+            "executable_edge_note": (
+                "uses historical best_ask/orderbook when available"
+                if executable_available
+                else "historical CLOB best_ask/orderbook unavailable; report uses p_cal - p_market only"
+            ),
+            "score_delta": float(signal_model.get("score_delta", forecast.p_raw - forecast.p_market) or 0.0),
+            "polymarket_alignment": {
+                "token_id": forecast.market_token_id,
+                "condition_id": market.get("condition_id"),
+                "yes_token_id": market.get("yes_token_id"),
+                "token_id_match": market.get("yes_token_id") in {None, "", forecast.market_token_id},
+                "price_source": market.get("polymarket_price_source") or "unknown",
+                "outcome_source": market.get("polymarket_outcome_source") or "unknown",
+                "market_price": forecast.p_market,
+                "final_yes_price": market.get("final_yes_price"),
+            },
+            "market_microstructure": {
+                "spread_bps": orderbook.get("spread_bps"),
+                "best_bid": orderbook.get("best_bid"),
+                "best_ask": best_ask,
+                "liquidity": market.get("liquidity"),
+                "volume_24h": market.get("volume_24h"),
+            },
         }
 
     @staticmethod

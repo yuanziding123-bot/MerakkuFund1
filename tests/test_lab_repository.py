@@ -149,6 +149,13 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     assert sample["signal_model"]["id"] == "linear-factor-v1"
     assert "sentiment" in sample["signal_model"]["feature_vector"]
     assert "sentiment" in sample["signal_model"]["feature_contributions"]
+    assert sample["edge_evidence"]["edge_type"] == "research_probability_gap"
+    assert sample["edge_evidence"]["research_edge"] == sample["p_cal"] - sample["p_market"]
+    assert sample["edge_evidence"]["executable_edge_available"] is False
+    assert sample["edge_evidence"]["polymarket_alignment"]["price_source"] in {
+        "clob_prices_history",
+        "unknown",
+    }
     assert sample["snapshot_manifest"]["prediction_time"] == "2026-04-01T00:00:00Z"
     assert sample["snapshot_manifest"]["sources"]
     assert sample["news_evidence"]["source"] == "historical_news"

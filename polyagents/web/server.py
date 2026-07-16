@@ -281,30 +281,37 @@ async def lab_data_ingest(request: Request) -> JSONResponse:
     try:
         payload = await request.json()
         limit = int(payload.get("limit", 100))
-        stats = run_polymarket_ingestion(limit=limit, db_path=DEFAULT_CONFIG["db_path"])
+        stats = await asyncio.to_thread(
+            run_polymarket_ingestion,
+            limit=limit,
+            db_path=DEFAULT_CONFIG["db_path"],
+        )
         return JSONResponse({"dry_run": False, "stats": asdict(stats)})
     except Exception as exc:
         return JSONResponse({"error": {"code": "ingestion_failed", "message": str(exc)}}, status_code=400)
 
 
-@app.post("/api/lab/hypotheses/{id}/backtests")
-async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
-    store = None
+def _run_lab_backtest_sync(id: str, payload: dict) -> dict:
+    store = DataStore(DEFAULT_CONFIG["db_path"])
     try:
-        payload = await request.json()
         body = {**payload, "hypothesis_id": id}
-        store = DataStore(DEFAULT_CONFIG["db_path"])
         result = BacktestRunner(store=store).run(BacktestRequest(**body))
-        return JSONResponse({
+        return {
             "backtest_run_id": result.id,
             "status": result.status,
             "report_id": result.report_id,
-        })
+        }
+    finally:
+        store.close()
+
+
+@app.post("/api/lab/hypotheses/{id}/backtests")
+async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        return JSONResponse(await asyncio.to_thread(_run_lab_backtest_sync, id, payload))
     except Exception as exc:
         return JSONResponse({"error": {"code": "evaluation_failed", "message": str(exc)}}, status_code=400)
-    finally:
-        if store is not None:
-            store.close()
 
 
 @app.post("/api/lab/monitor/opportunities")

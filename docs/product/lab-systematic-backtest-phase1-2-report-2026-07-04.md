@@ -177,12 +177,71 @@ momentum-v1       n=46 source=collections fixture=false
 
 ## Known Limitations
 
-- 当前 ingestion MVP 只构造 YES-token 样本。
-- 当前 prediction policy 使用价格序列 50% 位置，后续可增加多 prediction_time replay。
 - 历史 orderbook 尚未重建。
 - historical news 已有 PIT-safe MVP，但依赖新闻 API 的 historical coverage 和 published timestamp 质量；未带时间戳或晚于 prediction_time 的新闻会被跳过。
-- 样本量目前为 46 条可用 settled collections，已能 demo 真实链路，但仍需要扩大数据覆盖。
+- 样本量已能 demo 真实链路，但仍需要继续扩大历史覆盖并加入更严格的 holdout / cluster-aware 评估。
 - `tests/test_web_kernel_mode.py` 在当前 Codex 沙盒中仍会失败，因为新 main 的 SQLAlchemy audit/storage 默认路径指向 `/Users/haoyingwang/.polyagents/cache/aihf.db`，沙盒无法打开该路径。该问题不影响 Lab ingestion 或 strategy-aware backtest，但建议后续将测试环境 DB path 显式指向 `tmp_path` 或加入 fallback。
+
+## 2026-07-14 Addendum: Coverage And Edge Explainability
+
+本次增量继续提升 historical collections 覆盖率和 edge 可解释性，仍在功能分支审核，不直接推 main。
+
+### 新增能力
+
+- Polymarket 多 outcome / range market 现在会拆成 token-level binary collections：
+  - 每个 `clobTokenId` 单独生成 collection。
+  - `outcomePrices` 中最终价格接近 1 的 outcome 标记为赢，其余标记为输。
+  - 每条 collection 记录 `outcome_label`、`outcome_index`、`condition_id`、`yes_token_id`。
+- Ingestion 默认 prediction policy 从单点 midpoint 扩展为 `multi`：
+  - 默认生成 25% / 50% / 75% 三个 PIT prediction_time。
+  - 短历史会自动去重或跳过，仍保证 `available_at < prediction_time < resolution_time`。
+- Report 增加 `edge_evidence`：
+  - `research_edge = p_cal - p_market`。
+  - 明确 `executable_edge_available`，历史 best ask 缺失时不会假装有可成交 edge。
+  - 标记 Polymarket 对齐来源：`clob_prices_history` / `gamma_outcomePrices`。
+- Historical news 增加 run-level cache：
+  - 多 outcome 同一市场复用原始 Polymarket question 查询新闻。
+  - Tavily 查询按 date window 缓存，精确 PIT 过滤仍在本地执行。
+  - Stats 增加 `news_cache_hits` / `news_cache_misses`。
+
+### 当前默认 DataStore Snapshot
+
+```json
+{
+  "markets": 42,
+  "collections": 54,
+  "multi_snapshot_collections": 18,
+  "unique_tokens": 42,
+  "polymarket_price_source_aligned": 48
+}
+```
+
+真实小样本 ingestion 验证：
+
+```json
+{
+  "fetched_markets": 3,
+  "inserted": 12,
+  "duplicates": 6,
+  "updated_duplicates": 6,
+  "skipped_non_binary": 0,
+  "news_items_used": 90,
+  "news_cache_hits": 10,
+  "news_cache_misses": 8
+}
+```
+
+### 最新测试
+
+```text
+36 passed, 1 warning
+```
+
+### Updated Next Work
+
+- 扩大 historical ingestion limit，并观察 multi-snapshot 后的 sample adequacy / brier_delta 稳定性。
+- 增加 cluster-aware evaluation，避免同一 market 的多个时间点被误当成完全独立样本。
+- 继续补历史 orderbook / best bid ask，逐步把 research edge 升级为 executable edge。
 
 ## Next Recommended Work
 

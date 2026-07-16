@@ -6,6 +6,8 @@ and out of application static assets.
 ## Product
 
 - `product/AIHF产品PRD与技术架构v0.2.md` - current AIHF v0.2 PRD and technical architecture.
+- `product/lab-systematic-backtest-phase1-2-report-2026-07-04.md` - Lab historical ingestion, strategy-aware backtest, and later coverage addenda.
+- `product/lab-edge-coverage-progress-2026-07-14.md` - latest Lab edge coverage and Polymarket alignment progress report.
 
 ## Architecture
 
