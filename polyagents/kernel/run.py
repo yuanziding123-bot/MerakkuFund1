@@ -63,7 +63,7 @@ def run_mode(mode: str, *, request: str | None = None, registry: list | None = N
         if controller_llm is not None:
             ctrl_facts = {"event": request, **facts}   # so data_agent is selectable by the LLM
             ctrl = KernelController(reg, controller_llm, max_steps=max_steps,
-                                    on_event=on_event, audit=audit)
+                                    on_event=on_event, audit=audit, packs=packs)
             result = ctrl.run(request or "", history=history, **ctrl_facts)
             if result.llm_ok:                          # controller drove it → done
                 return _as_context(result)

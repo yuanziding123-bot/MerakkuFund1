@@ -173,13 +173,36 @@ class KernelController:
     """
 
     def __init__(self, registry: list[Capability], llm, *, max_steps: int = 8,
-                 on_event: Callable[[dict], None] | None = None, audit=None) -> None:
+                 on_event: Callable[[dict], None] | None = None, audit=None,
+                 packs: list[str] | None = None) -> None:
         self.registry = list(registry)
         self.llm = llm
         self.max_steps = max_steps
         self.on_event = on_event
         self.audit = audit
+        self.packs = packs                                  # explicitly-selected vertical packs
         self._history: list = []
+
+    def _pack_hint(self) -> str:
+        """When the user explicitly loaded vertical packs, tell the controller — so a
+        request that touches their area uses each selected pack's capabilities."""
+        if not self.packs:                                  # None=all / []=core-only → no special signal
+            return ""
+        try:
+            from .packs import PACKS
+        except Exception:
+            return ""
+        lines = []
+        for pid in self.packs:
+            p = PACKS.get(pid)
+            if p:
+                lines.append(f"  - {pid} ({p.get('name')}): {', '.join(p.get('capabilities', []))}")
+        if not lines:
+            return ""
+        return ("\nThe user EXPLICITLY loaded these vertical packs — when the request touches "
+                "their area, prefer their capabilities and try to cover EACH selected pack's angle "
+                "across steps (still one capability per step; don't call irrelevant ones):\n"
+                + "\n".join(lines) + "\n")
 
     def _emit(self, event: dict) -> None:
         if self.on_event:
@@ -209,7 +232,8 @@ class KernelController:
         steps = "\n".join(notes) or "- (none yet)"
         convo = _render_history(self._history)
         prefix = f"Conversation so far:\n{convo}\n\n" if convo else ""
-        user = (f"{prefix}User request: {request}\n\nFacts gathered so far:\n{facts}\n\n"
+        user = (f"{prefix}User request: {request}\n{self._pack_hint()}\n"
+                f"Facts gathered so far:\n{facts}\n\n"
                 f"Capabilities you can call now:\n{menu}\n\nSteps so far:\n{steps}\n\n"
                 "Next action? Resolve references to earlier turns from the conversation. "
                 "JSON only.")
