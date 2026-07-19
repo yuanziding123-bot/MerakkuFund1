@@ -1223,6 +1223,24 @@ def _format_prediction_journal(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_hedge(a: dict, path: str) -> str:
+    """Render the range / hedge-lock assessment for a market."""
+    if a.get("error"):
+        return f"**区间对冲锁利 · hedge_scan** · {path}\n\n失败:{a['error']}"
+    lines = [f"**区间对冲锁利评估 · hedge_scan** · {path}", "",
+             f"**标的**:{a.get('market')}  (匹配 {a.get('matched_by')})"]
+    if a.get("note"):
+        lines.append(f"\n{a['note']}")
+        return "\n".join(lines)
+    lines.append(f"\n现价 **{a.get('current')}** · 历史区间 [{a.get('low')}, {a.get('high')}] · "
+                 f"峰谷摆幅 **{a.get('range')}** · 数据点 {a.get('n')}")
+    lines.append(f"\n**最大可锁定利润 = {a.get('lockable')}** · {a.get('verdict')}")
+    lines.append(f"\n_玩法:在低点买 YES、价涨后买**等量 NO**(此时 NO 便宜),两腿成本 = YES买价+NO买价 < $1,"
+                 f"无论结果都赔付 $1 → 锁定 = 1−两腿成本 ≈ 峰谷价差。上面是**历史最优上限**(完美逮住低点+随后高点),"
+                 f"实际只吃一部分,且要扣手续费/滑点/流动性。想盯建仓时机 → market_radar;记你的判断 → log_prediction。_")
+    return "\n".join(lines)
+
+
 def _format_radar(a: dict, path: str) -> str:
     """Render the market radar: movers / near-resolution / fresh, each with WHY it
     matters, plus an LLM angle + arbitrage-check section."""
@@ -1555,6 +1573,8 @@ def _kernel_summary(ctx) -> str:
         return _format_prediction_logged(f["prediction_logged"], path)
     if "prediction_journal" in f:                        # journal + personal calibration
         return _format_prediction_journal(f["prediction_journal"], path)
+    if "hedge_scan" in f:                                # range / hedge-lock assessment
+        return _format_hedge(f["hedge_scan"], path)
     if "market_radar" in f:                              # 'what changed today' discovery funnel
         return _format_radar(f["market_radar"], path)
     if "conditional_arb" in f:                           # cross-market conditional/implication arb scan

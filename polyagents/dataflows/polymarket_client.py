@@ -147,6 +147,27 @@ class PolymarketDataClient:
             offset += GAMMA_PAGE
         return out
 
+    def search_markets(self, query: str, limit: int = 20) -> list[dict]:
+        """Full-text market search via Gamma's public-search — finds niche / low-volume
+        markets (e.g. F1 'Safety Car?') that the volume-ordered listing never pages to.
+        Returns raw Gamma market dicts (both open and resolved)."""
+        if not query:
+            return []
+        try:
+            r = self._http.get(f"{self.gamma_base}/public-search",
+                               params={"q": query, "limit_per_type": min(limit, 100)})
+            r.raise_for_status()
+            events = (r.json() or {}).get("events", []) or []
+        except Exception:
+            return []
+        out: list[dict] = []
+        for ev in events:
+            for m in ev.get("markets", []) or []:
+                out.append(m)
+                if len(out) >= limit:
+                    return out
+        return out
+
     def fetch_market_by_condition(self, condition_id: str) -> dict | None:
         """Fetch one market by condition id — for settlement.
 
@@ -210,16 +231,27 @@ class PolymarketDataClient:
     # ----- price history (CLOB) ---------------------------------------------
 
     def fetch_price_history(self, token_id: str, interval: str = "1h", fidelity: int = 60) -> list[Candle]:
-        """Synthetic candles (open=high=low=close=price); volume filled later."""
-        try:
-            r = self._http.get(
-                f"{self.clob_base}/prices-history",
-                params={"market": token_id, "interval": interval, "fidelity": fidelity},
-            )
-            r.raise_for_status()
-            history = r.json().get("history", [])
-        except Exception:
-            return []
+        """Synthetic candles (open=high=low=close=price); volume filled later.
+
+        Low-activity / resolved markets return nothing at fine fidelity, so coarsen
+        (hourly → 3h → 12h → daily) until the CLOB serves some history."""
+        history: list = []
+        tried = []
+        for fid in (fidelity, 180, 720, 1440):
+            if fid in tried:
+                continue
+            tried.append(fid)
+            try:
+                r = self._http.get(
+                    f"{self.clob_base}/prices-history",
+                    params={"market": token_id, "interval": interval, "fidelity": fid},
+                )
+                r.raise_for_status()
+                history = r.json().get("history", [])
+            except Exception:
+                history = []
+            if history:
+                break
         candles: list[Candle] = []
         for point in history:
             try:

@@ -49,6 +49,12 @@ PACKS: dict[str, dict] = {
                        "累积告诉你**在哪类市场你的判断真有 edge**。前向追踪,数据进共享/云库越攒越准。",
         "capabilities": ["log_prediction", "prediction_journal"],
     },
+    "range-hedge": {
+        "name": "区间对冲锁利评估",
+        "description": "给任一市场评估**峰谷摆幅 + 最大可锁定利润**:在低点买 YES、价涨后买等量 NO,"
+                       "两腿成本<$1、无论结果都赔付$1=锁定价差。适合安全车这类赛前剧烈波动的事件盘。",
+        "capabilities": ["hedge_scan"],
+    },
     "market-radar": {
         "name": "市场雷达(今天有什么变了)",
         "description": "扫全市场,surface 给人肉深挖的线索:近期价格**异动**最大的、**临近结算**的(endgame)、"

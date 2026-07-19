@@ -22,6 +22,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
+                           hedge_scan_capability,
                            log_prediction_capability, market_radar_capability,
                            news_to_markets_capability,
                            plot_market_capability, prediction_journal_capability,
@@ -771,6 +772,34 @@ def default_registry() -> list:
                 "movers": movers, "near_resolution": near_out, "fresh": fresh,
                 "structural": structural, "insight": insight}
 
+    # ----- pack: range-hedge (measure swing + lockable hedge profit) ------------
+
+    def hedge_scan(query):
+        """Resolve a market, pull its full price series, and measure the peak-trough swing
+        + the max profit lockable by legging into both sides over time (buy YES on a dip,
+        equal NO on a later pop → cost<$1, pays $1 either way)."""
+        ref = resolve(query)
+        if ref.get("error"):
+            return {"query": query, "error": ref["error"]}
+        candles = eng.client.fetch_price_history(ref.get("token_id", ""), interval="max")
+        ps = [c.close for c in candles if c.close is not None]
+        if len(ps) < 3:
+            return {"query": query, "market": ref.get("question"), "matched_by": ref.get("matched_by"),
+                    "n": len(ps), "note": "价格点不足,无法评估摆幅(市场太新/太冷或无历史)。"}
+        lo, hi = min(ps), max(ps)
+        run_min, lock = ps[0], 0.0                          # buy YES at running-min, hedge at a later pop
+        for p in ps[1:]:
+            run_min = min(run_min, p); lock = max(lock, p - run_min)
+        run_max, lock_rev = ps[0], 0.0                      # or buy NO at a peak, hedge on a later dip
+        for p in ps[1:]:
+            run_max = max(run_max, p); lock_rev = max(lock_rev, run_max - p)
+        best = round(max(lock, lock_rev), 4)
+        verdict = ("波动大,适合区间对冲锁利" if best >= 0.10
+                   else "摆动一般,能锁但薄" if best >= 0.04 else "太平,难锁利")
+        return {"query": query, "market": ref.get("question"), "matched_by": ref.get("matched_by"),
+                "n": len(ps), "current": round(ps[-1], 4), "low": round(lo, 4), "high": round(hi, 4),
+                "range": round(hi - lo, 4), "lockable": best, "verdict": verdict}
+
     # ----- pack: prediction-journal (log your own P, score it after resolution) --
 
     def log_prediction(query):
@@ -1165,12 +1194,24 @@ def default_registry() -> list:
         if m is None:
             rows = mcp_server.scan_markets(limit=120, min_volume_24h=0.0)   # wide net (WC dominates top)
             best, best_hits = _best_match(rows, {w for w in q.lower().split() if len(w) > 2})
-            if best_hits == 0:                            # no English overlap (e.g. a Chinese name):
-                terms = {w for t in _topic_terms(q) for w in _words(t)}   # LLM-translate, then retry
-                best, best_hits = _best_match(rows, terms)
-            if best is not None and best_hits > 0:
+            match_by = f"keywords({best_hits})"
+            if best_hits < 2:                             # weak/no scan match → LLM-translate
+                terms = {w for t in _topic_terms(q) for w in _words(t)}
+                if terms:
+                    b2, h2 = _best_match(rows, terms)     # re-match the scan with English terms first
+                    if h2 >= 2:                           # scan has a solid match → keep it (avoid drift)
+                        best, best_hits, match_by = b2, h2, f"keywords({h2})"
+                    else:                                 # still weak → full-text search for niche markets
+                        cands = list(rows)
+                        for mm in eng.client.to_markets(eng.client.search_markets(" ".join(sorted(terms)), limit=25)):
+                            if mm.outcome == "YES":
+                                cands.append({"token_id": mm.token_id, "question": mm.question, "price": mm.price})
+                        b3, h3 = _best_match(cands, terms)
+                        if h3 > best_hits:
+                            best, best_hits, match_by = b3, h3, f"search({h3})"
+            if best is not None and best_hits >= 1:
                 return {"token_id": best["token_id"], "question": best["question"],
-                        "price": best["price"], "matched_by": f"keywords({best_hits})"}
+                        "price": best["price"], "matched_by": match_by}
             m = eng.most_active_market()                   # nothing matched
             generic = (not q) or any(w in q.lower() for w in
                                      ("最活跃", "活跃", "most active", "liquid", "一个市场", "any market"))
@@ -1431,6 +1472,7 @@ def default_registry() -> list:
         research_alpha_capability(research_alpha),
         scan_conditional_arb_capability(scan_conditional_arb),
         market_radar_capability(market_radar),
+        hedge_scan_capability(hedge_scan),
         log_prediction_capability(log_prediction),
         prediction_journal_capability(prediction_journal),
         backfill_outcomes_capability(backfill_outcomes),

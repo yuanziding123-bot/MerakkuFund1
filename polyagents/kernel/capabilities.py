@@ -346,6 +346,22 @@ def prediction_journal_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"prediction_journal"}), run, cost=3)
 
 
+def hedge_scan_capability(fn: Callable) -> Capability:
+    """Range / hedge-lock scan (pack: range-hedge). ``fn(query) -> dict`` resolves a market,
+    pulls its full price series, and measures the peak-trough swing + the max profit you
+    could have LOCKED by legging into both sides at different times (buy YES on a dip, then
+    buy equal NO on a pop — total cost < $1, pays $1 either way). For volatile event-prop
+    markets (e.g. F1 'Safety Car?') where the price swings hard before resolution."""
+    def run(ctx: Context) -> dict:
+        return {"hedge_scan": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("hedge_scan",
+                      "Assess a market for the RANGE / HEDGE-LOCK strategy: measure its price "
+                      "swing (peak-to-trough) and the max profit lockable by buying YES on a dip "
+                      "then equal NO on a later pop (cost<$1, pays $1 either way). Use for '对冲锁利 / "
+                      "区间对冲 / 波动够不够锁利 / 这个市场能不能对冲套利 / hedge lock'. Computed.",
+                      frozenset({"question"}), frozenset({"hedge_scan"}), run, cost=3)
+
+
 def market_radar_capability(fn: Callable) -> Capability:
     """Market radar (pack: market-radar) — 'what changed today'. ``fn(query) -> dict``
     sweeps live markets and surfaces leads for a human to dig into: biggest recent price
