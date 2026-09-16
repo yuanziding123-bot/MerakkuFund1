@@ -81,3 +81,23 @@ def test_signal_agent_injects_similar_markets():
           "market_price": 0.5, "raw": {}})
     assert "similar past markets" in captured["prompt"].lower()
     assert "Bitcoin" in captured["prompt"]
+
+
+def test_news_chunked_vectorised_and_deduped():
+    """News is chunked, vectorised into its own collection, and chunk hits de-dup
+    back to the parent item at recall (event/news vector retrieval)."""
+    from polyagents.rag.store import ChromaRAG, _chunk
+
+    assert len(_chunk("word " * 200)) >= 2                 # long text splits into overlapping chunks
+    rag = ChromaRAG()
+    n = rag.index_news([
+        {"title": "Verstappen crashes in FP2 at Spa", "snippet": "heavy accident " * 60,
+         "url": "http://n/1", "sentiment": -0.4},
+        {"title": "Norris fastest in FP1", "snippet": "Lando topped practice.",
+         "url": "http://n/2", "sentiment": 0.2},
+    ], topic="belgian gp")
+    assert n >= 3                                           # multiple chunks stored
+    hits = rag.query_news("Verstappen accident safety car", n=3)
+    assert hits and hits[0]["metadata"]["parent_id"] == "http://n/1"   # most relevant item first
+    assert len({h["metadata"]["parent_id"] for h in hits}) == len(hits)  # de-duped to parents
+    assert all(h["metadata"]["kind"] == "news" for h in hits)          # from the news collection

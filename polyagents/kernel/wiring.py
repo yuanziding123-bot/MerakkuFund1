@@ -1000,14 +1000,19 @@ def default_registry() -> list:
             return {"query": query, "enabled": False,
                     "note": "新闻/情绪需要 TAVILY_API_KEY(.env),当前未配置"}
         items = nc.search(query or "", max_results=6)
-        scored = []
+        scored, docs = [], []
         for it in items:
-            s = eng.scorer.score(f"{getattr(it, 'title', '')} {getattr(it, 'snippet', '')}")
+            snip = getattr(it, "snippet", "")
+            s = eng.scorer.score(f"{getattr(it, 'title', '')} {snip}")
             scored.append({"title": getattr(it, "title", ""), "url": getattr(it, "url", ""),
                            "sentiment": round(float(s), 3)})
+            docs.append({"title": getattr(it, "title", ""), "url": getattr(it, "url", ""),
+                         "snippet": snip, "sentiment": round(float(s), 3)})
+        rag = getattr(eng, "rag", None)                    # vectorise (chunked) into the news collection
+        n_indexed = rag.index_news(docs, topic=query or "") if rag is not None else 0
         mean = round(sum(x["sentiment"] for x in scored) / len(scored), 3) if scored else 0.0
         signal = "偏多" if mean > 0.1 else ("偏空" if mean < -0.1 else "中性")
-        return {"query": query, "enabled": True, "n_items": len(scored),
+        return {"query": query, "enabled": True, "n_items": len(scored), "n_indexed": n_indexed,
                 "mean_sentiment": mean, "signal": signal, "items": scored}
 
     def news_to_markets(query, top=8):
